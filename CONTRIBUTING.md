@@ -22,6 +22,18 @@ pnpm screenshots   # retakes the README screenshots into e2e/screenshots/
 
 After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and commit `worker-configuration.d.ts`.
 
+## Branching
+
+Trunk-based: `master` is the only long-lived branch and is always releasable. There is no `develop` branch.
+
+1. Never commit to `master` directly. Branch from it, named by intent: `feat/…`, `fix/…`, `chore/…` or `docs/…`.
+2. Keep branches small and short-lived, merged within hours or days.
+3. Open a pull request into `master`. CI must pass (see [Release](#release)).
+4. Squash-merge and delete the branch. Because of the squash, git sees the branch as unmerged locally, so remove it with `git branch -D` after checking that `git diff master <branch>` is empty.
+5. Releases are not a branch: every push to `master` goes through the release pipeline below, and the production approval gate decides what ships.
+
+Recommended: `git config --global fetch.prune true`, so branches deleted on origin disappear locally on the next fetch.
+
 ## Release
 
 Nothing is deployed by hand.
