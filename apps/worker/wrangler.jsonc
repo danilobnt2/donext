@@ -1,0 +1,43 @@
+// Every Cloudflare resource this app uses is declared here and created by `wrangler deploy`
+// in the release pipeline. Durable Object namespaces are reconciled from `exports`, so a
+// re-deploy with no changes is a no-op.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Top level is for local development only; deploys always pass --env.
+  "name": "donext-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "exports": {
+    "UserStore": { "type": "durable-object", "storage": "sqlite" },
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
+  },
+  "vars": { "ENVIRONMENT": "development", "GIT_SHA": "dev" },
+  "env": {
+    "staging": {
+      "name": "donext-staging",
+      "routes": [{ "pattern": "donext-staging.orben.dev", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
+      },
+      "vars": { "ENVIRONMENT": "staging", "GIT_SHA": "unknown" },
+    },
+    "production": {
+      "name": "donext",
+      "routes": [{ "pattern": "donext.orben.dev", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
+      },
+      "vars": { "ENVIRONMENT": "production", "GIT_SHA": "unknown" },
+    },
+  },
+}

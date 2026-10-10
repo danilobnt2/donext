@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars*
+*.log
+.DS_Store
+.wrangler-e2e/
+test-results/
+playwright-report/
+e2e/screenshots/*.png

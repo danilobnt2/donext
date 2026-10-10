@@ -55,4 +55,45 @@ Screens are designed for mobile (390 px), tablet and desktop: Next up, To-Dos bo
 
 ## Status
 
-Planning stage. This repository starts with the product spec and app design; implementation follows.
+Bootstrap. The deployed slice lets anyone create a To-Do and see the list, on one board shared by everyone until sign-in exists. Limits: 500 characters per title, 10,000 To-Dos per board. Anyone can delete every To-Do with one button, so unwanted content can be cleared at once; this goes away with sign-in.
+
+<p>
+  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/desktop.png" alt="Do Next on desktop: a New To-Do form above a list of five To-Dos, each marked New, with a Delete all button" width="560">
+  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/mobile.png" alt="The same screen on a phone" width="218">
+</p>
+
+Screenshots are retaken from `master` on every push by the Screenshots workflow and stored on the [`screenshots`](https://github.com/danilobnt2/donext/tree/screenshots) branch.
+
+## Development
+
+Requires Node 22 and pnpm (`corepack enable`).
+
+```sh
+pnpm install
+pnpm dev        # builds the web app, then serves it and the API on http://localhost:8787
+pnpm --filter @donext/web dev   # optional: Vite with hot reload, proxying /api to 8787
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test
+pnpm test:e2e   # Playwright against a local wrangler dev; first run: pnpm --filter @donext/e2e exec playwright install chromium
+pnpm screenshots   # retakes the README screenshots into e2e/screenshots/
+```
+
+| Path | What |
+| --- | --- |
+| `apps/web` | Frontend (Preact + Vite), served by the Worker as static assets |
+| `apps/worker` | Worker (API) and the per-user Durable Object; `wrangler.jsonc` declares every Cloudflare resource |
+| `packages/shared` | Types and validation shared by both |
+| `e2e` | Playwright end-to-end tests (desktop and mobile Chromium) |
+
+After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and commit `worker-configuration.d.ts`.
+
+## Release
+
+Nothing is deployed by hand.
+
+1. **CI** (`.github/workflows/ci.yml`) runs on every pull request to `master`: lint, format, typecheck, unit tests and a build (`Check`), plus Playwright end-to-end tests (`E2E`). It must pass before merging.
+2. **Release** (`.github/workflows/release.yml`) runs on every push to `master`. It builds once and uploads the web assets and the bundled Worker as an artifact.
+3. That artifact is deployed to staging, [donext-staging.orben.dev](https://donext-staging.orben.dev), then smoke-tested.
+4. The run waits for approval on the `production` GitHub environment.
+5. On approval, it applies D1 migrations, deploys the same artifact to production, [donext.orben.dev](https://donext.orben.dev), and smoke-tests it.
+
+`wrangler deploy` creates the Worker, its custom domain and its Durable Object namespace from `wrangler.jsonc`. Redeploying unchanged config is a no-op. Durable Object SQLite schemas are migrated in code (`apps/worker/src/schema.ts`) the first time each object starts after a deploy. D1 migrations run in the pipeline, before the code that needs them. Keep both backward compatible with the previous release.
