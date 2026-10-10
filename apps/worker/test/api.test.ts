@@ -14,23 +14,23 @@ beforeEach(async () => {
 });
 
 const post = (body: unknown) =>
-  api('/api/todos', {
+  api('/api/v1/todos', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 
-describe('GET /api/health', () => {
+describe('GET /api/v1/health', () => {
   it('reports the environment and version', async () => {
-    const res = await api('/api/health');
+    const res = await api('/api/v1/health');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: 'ok', environment: 'development', version: 'dev' });
   });
 });
 
-describe('/api/todos', () => {
+describe('/api/v1/todos', () => {
   it('starts empty', async () => {
-    const res = await api('/api/todos');
+    const res = await api('/api/v1/todos');
     expect(await res.json()).toEqual({ todos: [] });
   });
 
@@ -42,7 +42,7 @@ describe('/api/todos', () => {
     expect(todo.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 
     await post({ title: 'Renew passport' });
-    const { todos } = await (await api('/api/todos')).json<{ todos: Todo[] }>();
+    const { todos } = await (await api('/api/v1/todos')).json<{ todos: Todo[] }>();
     expect(todos.map((t) => t.title)).toEqual(['Renew passport', 'Cut the lawn']);
   });
 
@@ -86,21 +86,21 @@ describe('/api/todos', () => {
   it('deletes every To-Do', async () => {
     await post({ title: 'Cut the lawn' });
     await post({ title: 'Renew passport' });
-    const res = await api('/api/todos', { method: 'DELETE' });
+    const res = await api('/api/v1/todos', { method: 'DELETE' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ deleted: 2 });
-    expect(await (await api('/api/todos')).json()).toEqual({ todos: [] });
+    expect(await (await api('/api/v1/todos')).json()).toEqual({ todos: [] });
   });
 
   it('allows only GET, POST and DELETE', async () => {
-    const res = await api('/api/todos', { method: 'PUT' });
+    const res = await api('/api/v1/todos', { method: 'PUT' });
     expect(res.status).toBe(405);
   });
 });
 
 describe('unknown API routes', () => {
-  it('return a JSON 404', async () => {
-    const res = await api('/api/nope');
+  it.each(['/api/nope', '/api/todos'])('%s returns a JSON 404', async (path) => {
+    const res = await api(path);
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: { code: 'not_found' } });
   });

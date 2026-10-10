@@ -11,11 +11,11 @@ export default {
   async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
-    if (pathname === '/api/health') {
+    if (pathname === '/api/v1/health') {
       return Response.json({ status: 'ok', environment: env.ENVIRONMENT, version: env.GIT_SHA });
     }
 
-    if (pathname === '/api/todos') {
+    if (pathname === '/api/v1/todos') {
       const store = env.USER_STORE.getByName(SHARED_BOARD);
       if (request.method === 'GET') return Response.json({ todos: await store.listTodos() });
       if (request.method === 'POST') return createTodo(request, store);

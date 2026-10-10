@@ -6,7 +6,7 @@ export const LOCAL_PORT = 8788;
 export const localWebServer: NonNullable<PlaywrightTestConfig['webServer']> = {
   command: `pnpm --filter @donext/web build && pnpm --filter @donext/worker exec wrangler dev --port ${LOCAL_PORT} --persist-to .wrangler-e2e`,
   cwd: '..',
-  url: `http://localhost:${LOCAL_PORT}/api/health`,
+  url: `http://localhost:${LOCAL_PORT}/api/v1/health`,
   reuseExistingServer: !process.env.CI,
   timeout: 120_000,
 };

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ request, page }) => {
   // Start every test from an empty board.
-  expect((await request.delete('/api/todos')).ok()).toBe(true);
+  expect((await request.delete('/api/v1/todos')).ok()).toBe(true);
   await page.goto('/');
 });
 
@@ -50,7 +50,7 @@ test('rejects blank and over-long titles', async ({ page }) => {
 
 test('deletes every To-Do only after confirming', async ({ page, request }) => {
   for (const title of ['Cut the lawn', 'Fix the bike brakes']) {
-    expect((await request.post('/api/todos', { data: { title } })).ok()).toBe(true);
+    expect((await request.post('/api/v1/todos', { data: { title } })).ok()).toBe(true);
   }
   await page.reload();
   await expect(page.getByRole('listitem')).toHaveCount(2);

@@ -13,7 +13,7 @@ let lastProblem = '';
 
 while (Date.now() < deadline) {
   try {
-    const res = await fetch(new URL('/api/health', baseUrl), { cache: 'no-store' });
+    const res = await fetch(new URL('/api/v1/health', baseUrl), { cache: 'no-store' });
     const body = res.ok ? await res.json() : null;
     if (body?.version === expectedVersion) {
       const page = await fetch(baseUrl);

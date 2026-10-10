@@ -16,8 +16,8 @@ const VIEWPORTS = {
 };
 
 test.beforeAll(async ({ request }) => {
-  await request.delete('/api/todos');
-  for (const title of SAMPLE_TODOS) await request.post('/api/todos', { data: { title } });
+  await request.delete('/api/v1/todos');
+  for (const title of SAMPLE_TODOS) await request.post('/api/v1/todos', { data: { title } });
 });
 
 for (const [name, { deviceScaleFactor, ...viewport }] of Object.entries(VIEWPORTS)) {
