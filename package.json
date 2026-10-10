@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dev": "pnpm --filter @donext/web build && pnpm --filter @donext/worker dev"
+    "dev": "pnpm --filter @donext/web build && pnpm --filter @donext/worker dev",
+    "test:e2e": "pnpm --filter @donext/e2e test:e2e"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

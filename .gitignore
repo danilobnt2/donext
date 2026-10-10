@@ -4,3 +4,6 @@ dist/
 .dev.vars*
 *.log
 .DS_Store
+.wrangler-e2e/
+test-results/
+playwright-report/
