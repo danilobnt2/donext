@@ -55,7 +55,7 @@ export function NewTodoDialog({ onClose, onCreated }: Props) {
   }
 
   return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="backdrop">
       <div className="sheet" role="dialog" aria-modal="true" aria-labelledby={headingId}>
         <div className="sheet-head">
           <h2 id={headingId}>New To-Do</h2>

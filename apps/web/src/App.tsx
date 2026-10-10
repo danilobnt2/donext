@@ -20,7 +20,7 @@ export function App() {
       .catch((e: Error) => setError(e.message))
   }, [])
 
-  useEffect(load, [])
+  useEffect(load, [load])
 
   const openDialog = () => {
     opener.current = document.activeElement as HTMLElement | null
@@ -38,7 +38,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24">
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 d="M5 12h14M13 6l6 6-6 6"
                 fill="none"
