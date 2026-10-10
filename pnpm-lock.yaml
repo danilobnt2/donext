@@ -216,6 +216,9 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: ^1.4.0
         version: 1.4.0(vitest@5.0.3(vite@8.3.4(esbuild@0.28.2)))
+      '@donext/web':
+        specifier: workspace:*
+        version: link:../web
       vitest:
         specifier: 5.0.3
         version: 5.0.3(vite@8.3.4(esbuild@0.28.2))
