@@ -1,6 +1,6 @@
 import { checkTitle, type Todo, type TodoState } from '@donext/shared';
 import { useEffect, useState } from 'preact/hooks';
-import { createTodo, listTodos } from './api';
+import { createTodo, deleteAllTodos, listTodos } from './api';
 
 const STATE_LABELS: Record<TodoState, string> = {
   new: 'New',
@@ -15,6 +15,8 @@ export function App() {
   const [title, setTitle] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     listTodos().then(setTodos, (e: Error) => setLoadError(e.message));
@@ -34,6 +36,17 @@ export function App() {
       setFormError((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onDeleteAll() {
+    setDeleteError(null);
+    try {
+      await deleteAllTodos();
+      setTodos([]);
+      setConfirmingDelete(false);
+    } catch (e) {
+      setDeleteError((e as Error).message);
     }
   }
 
@@ -69,7 +82,34 @@ export function App() {
       </form>
 
       <section aria-labelledby="todos-heading">
-        <h2 id="todos-heading">To-Dos</h2>
+        <div class="section-head">
+          <h2 id="todos-heading">To-Dos</h2>
+          {todos && todos.length > 0 && !confirmingDelete && (
+            <button type="button" class="quiet" onClick={() => setConfirmingDelete(true)}>
+              Delete all
+            </button>
+          )}
+        </div>
+        {confirmingDelete && (
+          <div class="confirm" role="group" aria-labelledby="confirm-text">
+            <p id="confirm-text">
+              Delete all {todos?.length} To-Dos for everyone? This can't be undone.
+            </p>
+            <div class="row">
+              <button type="button" class="danger" onClick={onDeleteAll}>
+                Delete all
+              </button>
+              <button type="button" class="quiet" onClick={() => setConfirmingDelete(false)}>
+                Cancel
+              </button>
+            </div>
+            {deleteError && (
+              <p class="error" role="alert">
+                {deleteError}
+              </p>
+            )}
+          </div>
+        )}
         {loadError && (
           <p class="error" role="alert">
             Could not load To-Dos: {loadError}

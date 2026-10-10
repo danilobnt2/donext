@@ -83,8 +83,17 @@ describe('/api/todos', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'todo_limit_reached' } });
   });
 
-  it('allows only GET and POST', async () => {
+  it('deletes every To-Do', async () => {
+    await post({ title: 'Cut the lawn' });
+    await post({ title: 'Renew passport' });
     const res = await api('/api/todos', { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: 2 });
+    expect(await (await api('/api/todos')).json()).toEqual({ todos: [] });
+  });
+
+  it('allows only GET, POST and DELETE', async () => {
+    const res = await api('/api/todos', { method: 'PUT' });
     expect(res.status).toBe(405);
   });
 });

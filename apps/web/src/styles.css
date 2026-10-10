@@ -9,6 +9,7 @@
   --accent-ink: #ffffff;
   --warn-ground: #fdead7;
   --warn-ink: #7a2e05;
+  --danger: #b42318;
   --chip: #e6e8e3;
   color-scheme: light;
 }
@@ -162,4 +163,44 @@ button:disabled {
   padding: 3px 8px;
   background: var(--chip);
   color: var(--ink);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+button.quiet {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--field);
+  height: 44px;
+  padding: 0 14px;
+  font-weight: 500;
+}
+
+button.danger {
+  background: var(--danger);
+  color: var(--accent-ink);
+  padding: 0 16px;
+}
+
+.confirm {
+  background: var(--warn-ground);
+  color: var(--warn-ink);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.confirm p {
+  margin: 0 0 10px;
+  font-weight: 500;
 }

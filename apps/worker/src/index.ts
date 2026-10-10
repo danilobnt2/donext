@@ -19,7 +19,9 @@ export default {
       const store = env.USER_STORE.getByName(SHARED_BOARD);
       if (request.method === 'GET') return Response.json({ todos: await store.listTodos() });
       if (request.method === 'POST') return createTodo(request, store);
-      return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+      if (request.method === 'DELETE')
+        return Response.json({ deleted: await store.deleteAllTodos() });
+      return new Response(null, { status: 405, headers: { Allow: 'GET, POST, DELETE' } });
     }
 
     return apiError(404, 'not_found', 'No such endpoint.');

@@ -41,6 +41,14 @@ export class UserStore extends DurableObject<Env> {
     );
     return { ok: true, todo: toTodo(row) };
   }
+
+  /**
+   * Deletes every To-Do. Lets anyone clear the shared board of unwanted content until
+   * sign-in gives each user their own; remove it then.
+   */
+  deleteAllTodos(): number {
+    return this.ctx.storage.sql.exec("DELETE FROM work_items WHERE type = 'todo'").rowsWritten;
+  }
 }
 
 function toTodo(row: TodoRow): Todo {

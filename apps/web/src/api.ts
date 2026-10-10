@@ -17,6 +17,11 @@ export async function createTodo(title: string): Promise<Todo> {
   return ((await res.json()) as { todo: Todo }).todo;
 }
 
+export async function deleteAllTodos(): Promise<void> {
+  const res = await fetch('/api/todos', { method: 'DELETE' });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
 async function errorMessage(res: Response): Promise<string> {
   try {
     return ((await res.json()) as ApiError).error.message;
