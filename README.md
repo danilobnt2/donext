@@ -95,3 +95,4 @@ pnpm build && pnpm --filter @donext/api dev   # app + API on http://localhost:87
   4. on approval, applies production D1 migrations and deploys the same build to production.
 
 Deploys need the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, set on the `staging` and `production` GitHub environments.
+`scripts/setup-github.sh` creates both environments, the production approval gate, those secrets and the `master` branch protection.
