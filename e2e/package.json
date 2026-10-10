@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test:e2e": "playwright test",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "screenshots": "playwright test -c playwright.screenshots.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

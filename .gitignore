@@ -7,3 +7,4 @@ dist/
 .wrangler-e2e/
 test-results/
 playwright-report/
+e2e/screenshots/*.png

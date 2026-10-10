@@ -1,7 +1,8 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"]
   },
-  "include": ["tests", "playwright.config.ts"]
+  "include": ["tests", "screenshots", "*.ts"]
 }
