@@ -1,10 +1,10 @@
 // Waits until a deployed environment serves the expected build, then checks the page loads.
 // The first deploy to a new custom domain can take a few minutes to get its certificate.
 //
-// Usage: node scripts/smoke-test.mjs <base-url> <git-sha>
+// Usage: node scripts/release-smoke-test.mjs <base-url> <git-sha>
 const [baseUrl, expectedVersion] = process.argv.slice(2);
 if (!baseUrl || !expectedVersion) {
-  console.error('Usage: node scripts/smoke-test.mjs <base-url> <git-sha>');
+  console.error('Usage: node scripts/release-smoke-test.mjs <base-url> <git-sha>');
   process.exit(1);
 }
 

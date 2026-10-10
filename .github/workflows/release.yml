@@ -60,7 +60,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Smoke test
-        run: node scripts/smoke-test.mjs https://donext-staging.orben.dev "$GITHUB_SHA"
+        run: node scripts/release-smoke-test.mjs https://donext-staging.orben.dev "$GITHUB_SHA"
 
   production:
     name: Deploy to production
@@ -88,4 +88,4 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Smoke test
-        run: node scripts/smoke-test.mjs https://donext.orben.dev "$GITHUB_SHA"
+        run: node scripts/release-smoke-test.mjs https://donext.orben.dev "$GITHUB_SHA"
