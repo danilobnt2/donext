@@ -41,7 +41,7 @@ The home screen answers one question: *what do I do next?*
 
 Everything runs on Cloudflare.
 
-- **Frontend**: static PWA on Pages, with a local IndexedDB copy and an offline change queue
+- **Frontend**: static PWA served as Worker static assets (one deployable, one origin), with a local IndexedDB copy and an offline change queue
 - **Worker**: single entry point that authenticates requests and routes to the user's Durable Object
 - **Durable Object** (one per user, SQLite-backed): that user's data, the write pipeline, live sync over WebSocket, reminder alarms, and push sending
 - **D1**: accounts, passkeys, sessions and calendar feed tokens
@@ -55,4 +55,43 @@ Screens are designed for mobile (390 px), tablet and desktop: Next up, To-Dos bo
 
 ## Status
 
-Planning stage. This repository starts with the product spec and app design; implementation follows.
+First slice shipped: **creating a To-Do** (title, optional notes, optional due date) and seeing it on the To-Do board. It runs through the real architecture: the Worker resolves a guest session from D1, and the user's Durable Object stores the item plus its first append-only revision. Sign-in, Tasks and the rest of the stories follow.
+
+## Repository
+
+pnpm workspace:
+
+| Path | What |
+| --- | --- |
+| `apps/web` | React + Vite frontend |
+| `apps/api` | Worker, `UserStore` Durable Object, D1 migrations, `wrangler.jsonc` |
+| `packages/shared` | Domain types and validation shared by both |
+
+## Development
+
+Requires Node 22 and pnpm 10.
+
+```sh
+pnpm install
+pnpm --filter @donext/api exec wrangler d1 migrations apply DB --local
+pnpm build && pnpm --filter @donext/api dev   # app + API on http://localhost:8787
+# or, for frontend hot reload, run `pnpm dev` and open http://localhost:5173
+```
+
+`pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` are what CI runs. API tests run inside the Workers runtime.
+
+## Environments and release
+
+| Environment | URL | D1 database |
+| --- | --- | --- |
+| Staging | https://donext-staging.orben.dev | `donext-staging` |
+| Production | https://donext.orben.dev | `donext-production` |
+
+- Pull requests into `master` run the **CI** workflow, which must pass before merging. `master` only accepts changes through pull requests.
+- Each merge to `master` starts one **Deploy** run:
+  1. builds the app once and stores it as the `release` artifact;
+  2. applies staging D1 migrations and deploys that build to staging, then checks `/api/health`;
+  3. stops at the `production` environment gate until it is approved in the run page;
+  4. on approval, applies production D1 migrations and deploys the same build to production.
+
+Deploys need the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, set on the `staging` and `production` GitHub environments.
