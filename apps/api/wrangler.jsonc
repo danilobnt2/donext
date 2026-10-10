@@ -1,0 +1,66 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "donext-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "upload_source_maps": true,
+  "minify": true,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserStore"] }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "donext-local",
+      "database_id": "local",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": { "ENVIRONMENT": "local" },
+  "env": {
+    "staging": {
+      "name": "donext-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "donext-staging.orben.dev", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "donext-staging",
+          "database_id": "ef8a18af-358e-47c4-878c-dc8e680c5dc7",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": { "ENVIRONMENT": "staging" }
+    },
+    "production": {
+      "name": "donext-production",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "donext.orben.dev", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "donext-production",
+          "database_id": "5ec0f8de-504c-422a-a84c-32f45d69680c",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": { "ENVIRONMENT": "production" }
+    }
+  }
+}

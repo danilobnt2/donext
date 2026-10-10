@@ -1,0 +1,22 @@
+{
+  "name": "@donext/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@donext/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "wrangler": "4.149.0"
+  }
+}
