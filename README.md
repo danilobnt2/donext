@@ -90,7 +90,7 @@ After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and co
 
 Nothing is deployed by hand.
 
-1. **CI** (`.github/workflows/ci.yml`) runs on every pull request to `master`: lint, format, typecheck, unit tests and a build (`Check`), plus Playwright end-to-end tests (`E2E`). It must pass before merging.
+1. **CI** (`.github/workflows/ci.yml`) runs on every pull request to `master`: lint, format, typecheck, unit tests and a build (`Lint, test and build`), plus Playwright end-to-end tests (`E2E`). It must pass before merging.
 2. **Release** (`.github/workflows/release.yml`) runs on every push to `master`. It builds once and uploads the web assets and the bundled Worker as an artifact.
 3. That artifact is deployed to staging, [donext-staging.orben.dev](https://donext-staging.orben.dev), then smoke-tested.
 4. The run waits for approval on the `production` GitHub environment.
