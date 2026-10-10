@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @donext/web --filter @donext/api dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @donext/web build && pnpm --filter @donext/api build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "biome check .",
