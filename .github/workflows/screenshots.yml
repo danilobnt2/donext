@@ -1,0 +1,40 @@
+# Retakes the README screenshots from the code on master and force-pushes them to the
+# `screenshots` branch, which the README links to. They are never committed to master, so
+# rendering differences between machines can't create noise in pull requests.
+name: Screenshots
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: Update screenshots
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Install Chromium
+        run: pnpm --filter @donext/e2e exec playwright install --with-deps chromium
+      - run: pnpm screenshots
+      - name: Publish to the screenshots branch
+        working-directory: e2e/screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q -b screenshots
+          git add ./*.png
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qm "Screenshots of ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:screenshots

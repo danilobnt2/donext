@@ -55,4 +55,15 @@ Screens are designed for mobile (390 px), tablet and desktop: Next up, To-Dos bo
 
 ## Status
 
-Planning stage. This repository starts with the product spec and app design; implementation follows.
+Bootstrap. The deployed slice lets anyone create a To-Do and see the list, on one board shared by everyone until sign-in exists. Limits: 500 characters per title, 10,000 To-Dos per board. Anyone can delete every To-Do with one button, so unwanted content can be cleared at once; this goes away with sign-in.
+
+<p>
+  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/desktop.png" alt="Do Next on desktop: a New To-Do form above a list of five To-Dos, each marked New, with a Delete all button" width="560">
+  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/mobile.png" alt="The same screen on a phone" width="218">
+</p>
+
+Screenshots are retaken from `master` on every push by the Screenshots workflow and stored on the [`screenshots`](https://github.com/danilobnt2/donext/tree/screenshots) branch.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and the release flow.
