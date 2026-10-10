@@ -1,5 +1,12 @@
 # Contributing
 
+## Spec and design
+
+- [Spec](https://claude.ai/artifact/UT5p51iPvdawqz7E64AerS#25893944-f74f)
+- [Design](https://claude.ai/artifact/A5as3a4Go9gE4ru61CeZbW#page-dcb81aee8d83)
+
+They describe the overall intent and desired outcome, not fixed design decisions.
+
 ## Development
 
 Requires Node 22 and pnpm (`corepack enable`).
