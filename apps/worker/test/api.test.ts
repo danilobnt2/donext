@@ -1,10 +1,17 @@
 import { TITLE_MAX_LENGTH, TODO_LIMIT, type Todo } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 const api = (path: string, init?: RequestInit) =>
   exports.default.fetch(new Request(`https://donext.test${path}`, init));
+
+// Durable Object storage persists across tests in this file, so start each one empty.
+beforeEach(async () => {
+  await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
+    state.storage.sql.exec('DELETE FROM work_items');
+  });
+});
 
 const post = (body: unknown) =>
   api('/api/todos', {
