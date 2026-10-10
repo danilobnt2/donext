@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+      - run: pnpm format:check
+      - name: Generated Worker types are current
+        run: |
+          pnpm --filter @donext/worker types
+          git diff --exit-code -- apps/worker/worker-configuration.d.ts
+      - run: pnpm typecheck
+      - run: pnpm test
+      # Builds the web assets and bundles the Worker with a dry-run deploy, which also
+      # validates wrangler.jsonc.
+      - run: pnpm build
