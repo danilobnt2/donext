@@ -1,6 +1,6 @@
-import { checkTitle, type Todo, type TodoState } from '@donext/shared';
+import type { Rejection, SyncStatus, TodoState } from '@donext/shared';
 import { useEffect, useState } from 'preact/hooks';
-import { createTodo, deleteAllTodos, listTodos } from './api';
+import { startSync, type SyncRuntime } from './sync/runtime';
 
 const STATE_LABELS: Record<TodoState, string> = {
   new: 'New',
@@ -10,42 +10,85 @@ const STATE_LABELS: Record<TodoState, string> = {
   abandoned: 'Abandoned',
 };
 
+/** Opens the local data and re-renders whenever it, the sync status or a rejection changes. */
+function useSync(): { runtime: SyncRuntime | null; error: string | null } {
+  const [runtime, setRuntime] = useState<SyncRuntime | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [, redraw] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let stop = () => {};
+    startSync().then(
+      (started) => {
+        if (cancelled) {
+          started.scheduler.stop();
+          return;
+        }
+        const unsubscribe = started.engine.subscribe(() => redraw((count) => count + 1));
+        stop = () => {
+          unsubscribe();
+          started.scheduler.stop();
+        };
+        setRuntime(started);
+      },
+      (e: Error) => {
+        if (!cancelled) setError(e.message);
+      },
+    );
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, []);
+
+  return { runtime, error };
+}
+
+function syncLabel(status: SyncStatus): string {
+  const waiting = status.pending === 1 ? '1 change' : `${status.pending} changes`;
+  if (!status.connected) return status.pending > 0 ? `Offline · ${waiting} waiting` : 'Offline';
+  return status.pending > 0 ? `Syncing ${waiting}…` : 'Synced';
+}
+
+function describeRejection({ op, message }: Rejection): string {
+  return op.kind === 'create_todo'
+    ? `Could not save “${op.title}”: ${message}`
+    : `A change to a To-Do was refused: ${message}`;
+}
+
 export function App() {
-  const [todos, setTodos] = useState<Todo[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { runtime, error: loadError } = useSync();
+  const todos = runtime?.engine.view() ?? null;
+  const status = runtime?.engine.status();
+  const rejections = runtime?.engine.rejections() ?? [];
+
   const [title, setTitle] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  useEffect(() => {
-    listTodos().then(setTodos, (e: Error) => setLoadError(e.message));
-  }, []);
-
   async function onSubmit(event: Event) {
     event.preventDefault();
-    const check = checkTitle(title);
-    if (!check.ok) return setFormError(check.message);
-    setSaving(true);
+    if (!runtime) return;
     setFormError(null);
     try {
-      const todo = await createTodo(check.title);
-      setTodos((current) => [todo, ...(current ?? [])]);
+      const result = await runtime.engine.createTodo(title);
+      if (!result.ok) return setFormError(result.message);
       setTitle('');
+      runtime.scheduler.syncNow();
     } catch (e) {
       setFormError((e as Error).message);
-    } finally {
-      setSaving(false);
     }
   }
 
   async function onDeleteAll() {
+    if (!runtime) return;
     setDeleteError(null);
     try {
-      await deleteAllTodos();
-      setTodos([]);
+      await runtime.engine.abandonAll();
       setConfirmingDelete(false);
+      runtime.scheduler.syncNow();
     } catch (e) {
       setDeleteError((e as Error).message);
     }
@@ -56,6 +99,15 @@ export function App() {
       <header>
         <h1>Do Next</h1>
         <p class="lead">To-Dos are outcomes you want to reach.</p>
+        {status && (
+          <p
+            class="sync-status"
+            role="status"
+            data-state={!status.connected ? 'offline' : status.pending > 0 ? 'syncing' : 'synced'}
+          >
+            {syncLabel(status)}
+          </p>
+        )}
       </header>
 
       <form class="new-todo" onSubmit={onSubmit} noValidate>
@@ -71,7 +123,7 @@ export function App() {
             aria-invalid={formError !== null}
             aria-describedby={formError ? 'title-error' : undefined}
           />
-          <button type="submit" disabled={saving}>
+          <button type="submit" disabled={!runtime}>
             Add
           </button>
         </div>
@@ -81,6 +133,19 @@ export function App() {
           </p>
         )}
       </form>
+
+      {rejections.map((rejection) => (
+        <div class="rejection" role="alert" key={rejection.op.opId}>
+          <p>{describeRejection(rejection)}</p>
+          <button
+            type="button"
+            class="quiet"
+            onClick={() => runtime?.engine.dismissRejection(rejection.op.opId)}
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
 
       <section aria-labelledby="todos-heading">
         <div class="section-head">

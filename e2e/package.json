@@ -8,6 +8,7 @@
     "screenshots": "playwright test -c playwright.screenshots.config.ts"
   },
   "devDependencies": {
+    "@donext/shared": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "ulid": "3.0.2"

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { resetBoard, seedTodos } from '../board';
 
 const OUT_DIR = new URL('./', import.meta.url).pathname;
 
@@ -16,8 +17,8 @@ const VIEWPORTS = {
 };
 
 test.beforeAll(async ({ request }) => {
-  await request.delete('/api/v1/todos');
-  for (const title of SAMPLE_TODOS) await request.post('/api/v1/todos', { data: { title } });
+  await resetBoard(request);
+  await seedTodos(request, SAMPLE_TODOS);
 });
 
 for (const [name, { deviceScaleFactor, ...viewport }] of Object.entries(VIEWPORTS)) {

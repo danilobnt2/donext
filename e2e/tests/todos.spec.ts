@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { boardTitles, resetBoard, seedTodos } from '../board';
 
 test.beforeEach(async ({ request, page }) => {
   // Start every test from an empty board.
-  expect((await request.delete('/api/v1/todos')).ok()).toBe(true);
+  await resetBoard(request);
   await page.goto('/');
 });
 
@@ -49,9 +50,7 @@ test('rejects blank and over-long titles', async ({ page }) => {
 });
 
 test('deletes every To-Do only after confirming', async ({ page, request }) => {
-  for (const title of ['Cut the lawn', 'Fix the bike brakes']) {
-    expect((await request.post('/api/v1/todos', { data: { title } })).ok()).toBe(true);
-  }
+  await seedTodos(request, ['Cut the lawn', 'Fix the bike brakes']);
   await page.reload();
   await expect(page.getByRole('listitem')).toHaveCount(2);
 
@@ -67,4 +66,37 @@ test('deletes every To-Do only after confirming', async ({ page, request }) => {
 
   await page.reload();
   await expect(page.getByRole('listitem')).toHaveCount(0);
+});
+
+test('keeps working offline and syncs, in order, when the connection returns', async ({
+  page,
+  context,
+  request,
+}) => {
+  const status = page.getByRole('status');
+  await expect(status).toHaveText('Synced');
+
+  await context.setOffline(true);
+  const input = page.getByLabel('New To-Do');
+  await input.fill('Written offline');
+  await input.press('Enter');
+  await input.fill('Also written offline');
+  await input.press('Enter');
+
+  await expect(page.getByRole('listitem')).toHaveText([/Also written offline/, /Written offline/]);
+  await expect(status).toHaveText('Offline · 2 changes waiting');
+  expect(await boardTitles(request)).toEqual([]);
+
+  await context.setOffline(false);
+  await expect(status).toHaveText('Synced', { timeout: 20_000 });
+  expect(await boardTitles(request)).toEqual(['Also written offline', 'Written offline']);
+});
+
+test('shows To-Dos added from another device', async ({ page, request }) => {
+  await expect(page.getByText('Nothing yet. Add your first To-Do above.')).toBeVisible();
+
+  await seedTodos(request, ['Added elsewhere']);
+  // A page coming back into view syncs at once; this stands in for that.
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.getByRole('listitem')).toHaveText([/Added elsewhere/]);
 });
