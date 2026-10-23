@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TITLE_MAX_LENGTH, checkTitle } from './index';
+import { TITLE_MAX_LENGTH, checkTitle } from './todo';
 
 describe('checkTitle', () => {
   it('trims and accepts a normal title', () => {
