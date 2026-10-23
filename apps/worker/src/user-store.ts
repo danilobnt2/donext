@@ -3,7 +3,14 @@ import { TODO_LIMIT, type Todo, type TodoState } from '@donext/shared';
 import { ulid } from 'ulid';
 import { migrate } from './schema';
 
-type TodoRow = { id: string; title: string; state: TodoState; created_at: string };
+type TodoRow = {
+  id: string;
+  title: string;
+  state: TodoState;
+  rev: number;
+  created_at: string;
+  updated_at: string;
+};
 
 export type CreateTodoResult = { ok: true; todo: Todo } | { ok: false; reason: 'limit_reached' };
 
@@ -17,7 +24,7 @@ export class UserStore extends DurableObject<Env> {
   listTodos(): Todo[] {
     return this.ctx.storage.sql
       .exec<TodoRow>(
-        "SELECT id, title, state, created_at FROM work_items WHERE type = 'todo' ORDER BY id DESC",
+        "SELECT id, title, state, rev, created_at, updated_at FROM work_items WHERE type = 'todo' ORDER BY id DESC",
       )
       .toArray()
       .map(toTodo);
@@ -30,7 +37,14 @@ export class UserStore extends DurableObject<Env> {
     if (count >= TODO_LIMIT) return { ok: false, reason: 'limit_reached' };
 
     const now = new Date().toISOString();
-    const row: TodoRow = { id: ulid(), title, state: 'new', created_at: now };
+    const row: TodoRow = {
+      id: ulid(),
+      title,
+      state: 'new',
+      rev: 1,
+      created_at: now,
+      updated_at: now,
+    };
     this.ctx.storage.sql.exec(
       "INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at) VALUES (?, 'todo', ?, ?, 1, ?, ?)",
       row.id,
@@ -52,5 +66,12 @@ export class UserStore extends DurableObject<Env> {
 }
 
 function toTodo(row: TodoRow): Todo {
-  return { id: row.id, title: row.title, state: row.state, createdAt: row.created_at };
+  return {
+    id: row.id,
+    title: row.title,
+    state: row.state,
+    rev: row.rev,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }

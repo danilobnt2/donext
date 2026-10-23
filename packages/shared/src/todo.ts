@@ -4,13 +4,17 @@ export const TITLE_MAX_LENGTH = 500;
 /** Most To-Dos one board can hold. Becomes the per-user limit once sign-in exists. */
 export const TODO_LIMIT = 10_000;
 
-export type TodoState = 'new' | 'active' | 'pending' | 'done';
+/** Abandoned is a hidden end state: the To-Do leaves the board but keeps its history. */
+export type TodoState = 'new' | 'active' | 'pending' | 'done' | 'abandoned';
 
 export interface Todo {
   id: string;
   title: string;
   state: TodoState;
+  /** Number of the latest revision; 1 for a new To-Do. */
+  rev: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateTodoRequest {

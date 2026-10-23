@@ -7,6 +7,7 @@ const STATE_LABELS: Record<TodoState, string> = {
   active: 'Active',
   pending: 'Pending',
   done: 'Done',
+  abandoned: 'Abandoned',
 };
 
 export function App() {
