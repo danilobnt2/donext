@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@donext/shared": "workspace:*",
-    "preact": "11.0.1"
+    "preact": "11.0.1",
+    "ulid": "3.0.2"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
+    "fake-indexeddb": "6.2.6",
     "vite": "8.3.4",
     "vitest": "5.0.3"
   }
