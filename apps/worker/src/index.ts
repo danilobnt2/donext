@@ -1,7 +1,6 @@
 import {
   DEFAULT_PULL_LIMIT,
   MAX_PULL_LIMIT,
-  checkTitle,
   parsePushRequest,
   type ApiError,
   type ApiErrorCode,
@@ -13,7 +12,6 @@ export { UserStore } from './user-store';
 
 /** Every request uses this one store until sign-in gives each user their own. */
 const SHARED_BOARD = 'shared-board';
-const MAX_BODY_BYTES = 4096;
 /** A push holds up to MAX_OPS_PER_PUSH changes, each with a title of up to 500 characters. */
 const MAX_SYNC_BODY_BYTES = 256 * 1024;
 
@@ -33,36 +31,9 @@ export default {
       return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
     }
 
-    if (pathname === '/api/v1/todos') {
-      const store = env.USER_STORE.getByName(SHARED_BOARD);
-      if (request.method === 'GET') return Response.json({ todos: await store.listTodos() });
-      if (request.method === 'POST') return createTodo(request, store);
-      if (request.method === 'DELETE')
-        return Response.json({ deleted: await store.deleteAllTodos() });
-      return new Response(null, { status: 405, headers: { Allow: 'GET, POST, DELETE' } });
-    }
-
     return apiError(404, 'not_found', 'No such endpoint.');
   },
 } satisfies ExportedHandler<Env>;
-
-async function createTodo(
-  request: Request,
-  store: DurableObjectStub<UserStore>,
-): Promise<Response> {
-  const read = await readJson(request, MAX_BODY_BYTES);
-  if (!read.ok) return read.response;
-  const { body } = read;
-
-  const title = checkTitle(
-    body !== null && typeof body === 'object' && 'title' in body ? body.title : undefined,
-  );
-  if (!title.ok) return apiError(400, 'invalid_title', title.message);
-
-  const result = await store.createTodo(title.title);
-  if (!result.ok) return apiError(409, 'todo_limit_reached', 'This board is full.');
-  return Response.json({ todo: result.todo }, { status: 201 });
-}
 
 async function pushOps(request: Request, store: DurableObjectStub<UserStore>): Promise<Response> {
   const read = await readJson(request, MAX_SYNC_BODY_BYTES);

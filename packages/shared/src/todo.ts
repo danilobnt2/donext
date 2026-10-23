@@ -17,17 +17,7 @@ export interface Todo {
   updatedAt: string;
 }
 
-export interface CreateTodoRequest {
-  title: string;
-}
-
-export type ApiErrorCode =
-  | 'invalid_json'
-  | 'invalid_request'
-  | 'invalid_title'
-  | 'payload_too_large'
-  | 'todo_limit_reached'
-  | 'not_found';
+export type ApiErrorCode = 'invalid_json' | 'invalid_request' | 'payload_too_large' | 'not_found';
 
 export interface ApiError {
   error: { code: ApiErrorCode; message: string };

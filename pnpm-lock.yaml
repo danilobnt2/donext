@@ -218,9 +218,6 @@ importers:
       '@donext/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      ulid:
-        specifier: 3.0.2
-        version: 3.0.2
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: ^1.4.0
@@ -228,6 +225,9 @@ importers:
       '@donext/web':
         specifier: workspace:*
         version: link:../web
+      ulid:
+        specifier: 3.0.2
+        version: 3.0.2
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@22.20.5)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2))
