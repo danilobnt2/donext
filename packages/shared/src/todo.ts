@@ -22,7 +22,12 @@ export interface CreateTodoRequest {
 }
 
 export type ApiErrorCode =
-  'invalid_json' | 'invalid_title' | 'payload_too_large' | 'todo_limit_reached' | 'not_found';
+  | 'invalid_json'
+  | 'invalid_request'
+  | 'invalid_title'
+  | 'payload_too_large'
+  | 'todo_limit_reached'
+  | 'not_found';
 
 export interface ApiError {
   error: { code: ApiErrorCode; message: string };
