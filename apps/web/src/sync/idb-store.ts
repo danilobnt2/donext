@@ -1,7 +1,7 @@
-import type { LocalStore, StoreChange, StoreSnapshot, SyncOp, Todo } from '@donext/shared';
+import type { EntityItem, LocalStore, StoreChange, StoreSnapshot, SyncOp } from '@donext/shared';
 
 const DB_VERSION = 1;
-const STORES = ['meta', 'todos', 'outbox'];
+const STORES = ['meta', 'items', 'outbox'];
 
 /** The outbox keeps its order from IndexedDB's auto-incrementing key. */
 interface OutboxRecord {
@@ -22,7 +22,7 @@ export class IdbStore implements LocalStore {
     request.onupgradeneeded = () => {
       const db = request.result;
       db.createObjectStore('meta');
-      db.createObjectStore('todos', { keyPath: 'id' });
+      db.createObjectStore('items', { keyPath: 'id' });
       db.createObjectStore('outbox', { autoIncrement: true }).createIndex('opId', 'opId', {
         unique: true,
       });
@@ -36,16 +36,16 @@ export class IdbStore implements LocalStore {
   async load(): Promise<StoreSnapshot> {
     const tx = this.db.transaction(STORES, 'readonly');
     const meta = tx.objectStore('meta');
-    const [deviceId, cursor, todos, records] = await Promise.all([
+    const [deviceId, cursor, items, records] = await Promise.all([
       requestResult(meta.get('deviceId')),
       requestResult(meta.get('cursor')),
-      requestResult<Todo[]>(tx.objectStore('todos').getAll()),
+      requestResult<EntityItem[]>(tx.objectStore('items').getAll()),
       requestResult<OutboxRecord[]>(tx.objectStore('outbox').getAll()),
     ]);
     return {
       deviceId: typeof deviceId === 'string' ? deviceId : null,
       cursor: typeof cursor === 'number' ? cursor : 0,
-      todos,
+      items,
       outbox: records.map((record) => record.op),
     };
   }
@@ -56,17 +56,17 @@ export class IdbStore implements LocalStore {
     done.catch(() => {}); // reported through the await below, or by the throw that aborted it
     try {
       const meta = tx.objectStore('meta');
-      const todos = tx.objectStore('todos');
+      const items = tx.objectStore('items');
       const outbox = tx.objectStore('outbox');
 
       if (change.deviceId !== undefined) meta.put(change.deviceId, 'deviceId');
       if (change.clear) {
-        todos.clear();
+        items.clear();
         meta.put(0, 'cursor');
       }
-      for (const todo of change.put ?? []) {
-        const existing = await requestResult<Todo | undefined>(todos.get(todo.id));
-        if (todo.rev >= (existing?.rev ?? 0)) todos.put(todo);
+      for (const item of change.put ?? []) {
+        const existing = await requestResult<EntityItem | undefined>(items.get(item.id));
+        if (item.rev >= (existing?.rev ?? 0)) items.put(item);
       }
       for (const op of change.addOps ?? []) outbox.add({ opId: op.opId, op });
       for (const opId of change.dropOps ?? []) {

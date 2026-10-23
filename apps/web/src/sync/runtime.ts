@@ -1,4 +1,4 @@
-import { MemoryStore, SyncEngine, httpTransport, type LocalStore } from '@donext/shared';
+import { MemoryStore, SCHEMAS, SyncEngine, httpTransport, type LocalStore } from '@donext/shared';
 import { monotonicFactory } from 'ulid';
 import { IdbStore } from './idb-store';
 import { SyncScheduler, type WakeSource } from './scheduler';
@@ -16,6 +16,7 @@ export async function startSync(): Promise<SyncRuntime> {
   const engine = await SyncEngine.open({
     store: await openStore(),
     transport: httpTransport((path, init) => fetch(path, init)),
+    schemas: SCHEMAS,
     newId,
   });
   const scheduler = new SyncScheduler(engine, pageWake());

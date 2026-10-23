@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_OPS_PER_PUSH, parseOp, parsePushRequest } from './sync';
+import { MAX_FIELDS_PER_OP, MAX_OPS_PER_PUSH, parseOp, parsePushRequest } from './sync';
 
 const ITEM = '01J9ZZZZZZZZZZZZZZZZZZZZZZ';
 const NOW = '2026-10-23T10:00:00.000Z';
 
 const create = {
-  kind: 'create_todo',
+  kind: 'create',
   opId: 'op1',
+  entity: 'todo',
   itemId: ITEM,
-  title: 'Cut',
+  fields: { title: 'Cut' },
   clientChangedAt: NOW,
 };
 const update = {
-  kind: 'update_todo',
+  kind: 'update',
   opId: 'op2',
   itemId: ITEM,
   baseRev: 1,
@@ -26,34 +27,45 @@ describe('parseOp', () => {
     expect(parseOp(update)).toEqual({ ok: true, op: update });
   });
 
-  it('accepts abandoning, alone or with a new title', () => {
-    expect(parseOp({ ...update, changes: { state: 'abandoned' } }).ok).toBe(true);
-    expect(parseOp({ ...update, changes: { title: 'x', state: 'abandoned' } }).ok).toBe(true);
+  it('accepts every kind of plain field value, and a create with no fields', () => {
+    const fields = { a: 'text', b: 3, c: true, d: null };
+    expect(parseOp({ ...create, fields }).ok).toBe(true);
+    expect(parseOp({ ...update, changes: fields }).ok).toBe(true);
+    expect(parseOp({ ...create, fields: {} }).ok).toBe(true);
   });
 
-  it('does not trim or check the title: that is the server’s rule', () => {
-    expect(parseOp({ ...create, title: '   ' })).toEqual({
-      ok: true,
-      op: { ...create, title: '   ' },
-    });
+  it('does not check what the fields mean: that is the schema’s job', () => {
+    expect(parseOp({ ...create, fields: { title: '   ', whatever: 1 } }).ok).toBe(true);
+    expect(parseOp({ ...create, entity: 'unheardof' }).ok).toBe(true);
   });
 
   it.each([
     ['a non-object', 'nope'],
-    ['an unknown kind', { ...create, kind: 'delete_todo' }],
+    ['an unknown kind', { ...create, kind: 'delete' }],
     ['a missing opId', { ...create, opId: undefined }],
     ['an opId with spaces', { ...create, opId: 'a b' }],
     ['an over-long opId', { ...create, opId: 'x'.repeat(65) }],
     ['a malformed item id', { ...create, itemId: 'not-a-ulid' }],
     ['a lowercase item id', { ...create, itemId: ITEM.toLowerCase() }],
     ['a bad timestamp', { ...create, clientChangedAt: 'yesterday' }],
-    ['a non-string title', { ...create, title: 7 }],
+    ['a missing entity', { ...create, entity: undefined }],
+    ['an entity name that is not a name', { ...create, entity: 'To Do' }],
+    ['fields that are not an object', { ...create, fields: [] }],
+    ['a field name that is not a name', { ...create, fields: { 'a b': 1 } }],
+    ['a field value that is not plain', { ...create, fields: { a: { b: 1 } } }],
+    ['a field value that is not finite', { ...create, fields: { a: Infinity } }],
+    [
+      'too many fields',
+      {
+        ...create,
+        fields: Object.fromEntries(
+          Array.from({ length: MAX_FIELDS_PER_OP + 1 }, (_, i) => [`f${i}`, 1]),
+        ),
+      },
+    ],
     ['a negative baseRev', { ...update, baseRev: -1 }],
     ['a fractional baseRev', { ...update, baseRev: 1.5 }],
     ['empty changes', { ...update, changes: {} }],
-    ['unknown changes', { ...update, changes: { notes: 'x' } }],
-    ['a non-string new title', { ...update, changes: { title: 3 } }],
-    ['a state other than abandoned', { ...update, changes: { state: 'done' } }],
     ['changes that are a list', { ...update, changes: [] }],
   ])('rejects %s', (_, raw) => {
     expect(parseOp(raw).ok).toBe(false);

@@ -1,4 +1,11 @@
-import type { Rejection, SyncStatus, TodoState } from '@donext/shared';
+import {
+  abandonAllTodos,
+  createTodo,
+  listTodos,
+  type Rejection,
+  type SyncStatus,
+  type TodoState,
+} from '@donext/shared';
 import { useEffect, useState } from 'preact/hooks';
 import { startSync, type SyncRuntime } from './sync/runtime';
 
@@ -52,14 +59,15 @@ function syncLabel(status: SyncStatus): string {
 }
 
 function describeRejection({ op, message }: Rejection): string {
-  return op.kind === 'create_todo'
-    ? `Could not save “${op.title}”: ${message}`
-    : `A change to a To-Do was refused: ${message}`;
+  const title = op.kind === 'create' ? op.fields.title : null;
+  return typeof title === 'string'
+    ? `Could not save “${title}”: ${message}`
+    : `A change was refused: ${message}`;
 }
 
 export function App() {
   const { runtime, error: loadError } = useSync();
-  const todos = runtime?.engine.view() ?? null;
+  const todos = runtime ? listTodos(runtime.engine) : null;
   const status = runtime?.engine.status();
   const rejections = runtime?.engine.rejections() ?? [];
 
@@ -73,7 +81,7 @@ export function App() {
     if (!runtime) return;
     setFormError(null);
     try {
-      const result = await runtime.engine.createTodo(title);
+      const result = await createTodo(runtime.engine, title);
       if (!result.ok) return setFormError(result.message);
       setTitle('');
       runtime.scheduler.syncNow();
@@ -86,7 +94,7 @@ export function App() {
     if (!runtime) return;
     setDeleteError(null);
     try {
-      await runtime.engine.abandonAll();
+      await abandonAllTodos(runtime.engine);
       setConfirmingDelete(false);
       runtime.scheduler.syncNow();
     } catch (e) {

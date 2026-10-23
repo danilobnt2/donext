@@ -1,4 +1,16 @@
-import { SyncEngine, MemoryStore, httpTransport, type Todo, type Transport } from '@donext/shared';
+import {
+  SCHEMAS,
+  MemoryStore,
+  SyncEngine,
+  abandonTodos,
+  createTodo,
+  httpTransport,
+  listTodos,
+  renameTodo,
+  toTodo,
+  type EntityItem,
+  type Transport,
+} from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -10,9 +22,9 @@ import { ulid } from 'ulid';
 
 beforeEach(async () => {
   await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
-    state.storage.sql.exec('DELETE FROM work_items');
-    state.storage.sql.exec('DELETE FROM work_item_revisions');
-    state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'work_item_revisions'");
+    state.storage.sql.exec('DELETE FROM entities');
+    state.storage.sql.exec('DELETE FROM entity_revisions');
+    state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'entity_revisions'");
   });
 });
 
@@ -26,6 +38,11 @@ function random(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+const network = () =>
+  httpTransport((path, init) =>
+    exports.default.fetch(new Request(`https://donext.test${path}`, init)),
+  );
 
 class Device {
   constructor(
@@ -43,42 +60,45 @@ class Device {
 
   static async open(): Promise<Device> {
     const link = { online: true };
-    const network = httpTransport((path, init) =>
-      exports.default.fetch(new Request(`https://donext.test${path}`, init)),
-    );
+    const server = network();
     const transport: Transport = {
       push: (deviceId, ops) => {
         if (!link.online) throw new Error('offline');
-        return network.push(deviceId, ops);
+        return server.push(deviceId, ops);
       },
       pull: (after, limit) => {
         if (!link.online) throw new Error('offline');
-        return network.pull(after, limit);
+        return server.pull(after, limit);
       },
     };
-    const engine = await SyncEngine.open({ store: new MemoryStore(), transport, newId: ulid });
+    const engine = await SyncEngine.open({
+      store: new MemoryStore(),
+      transport,
+      schemas: SCHEMAS,
+      newId: ulid,
+    });
     return new Device(engine, link);
   }
 }
 
-async function serverBoard(): Promise<{ visible: Todo[]; ids: Set<string> }> {
-  const network = httpTransport((path, init) =>
-    exports.default.fetch(new Request(`https://donext.test${path}`, init)),
-  );
-  const latest = new Map<string, Todo>();
+/** The server’s own account of the board: the newest revision of every item it ever accepted. */
+async function serverBoard(): Promise<{ visible: ReturnType<typeof toTodo>[]; ids: Set<string> }> {
+  const server = network();
+  const latest = new Map<string, EntityItem>();
   for (let after = 0; ;) {
-    const page = await network.pull(after, 500);
+    const page = await server.pull(after, 500);
     for (const revision of page.revisions) {
-      if (revision.todo.rev >= (latest.get(revision.itemId)?.rev ?? 0)) {
-        latest.set(revision.itemId, revision.todo);
+      if (revision.item.rev >= (latest.get(revision.itemId)?.rev ?? 0)) {
+        latest.set(revision.itemId, revision.item);
       }
       after = revision.seq;
     }
     if (!page.hasMore) break;
   }
   const visible = [...latest.values()]
-    .filter((todo) => todo.state !== 'abandoned')
-    .sort((a, b) => (a.id < b.id ? 1 : -1));
+    .filter((item) => item.fields.state !== 'abandoned')
+    .sort((a, b) => (a.id < b.id ? 1 : -1))
+    .map(toTodo);
   return { visible, ids: new Set(latest.keys()) };
 }
 
@@ -96,18 +116,18 @@ describe('devices that work independently', () => {
       const { engine } = device;
       const roll = next();
       if (roll < 0.3) {
-        const result = await engine.createTodo(`To-Do ${++counter}`);
+        const result = await createTodo(engine, `To-Do ${++counter}`);
         if (result.ok) created.add(result.id);
       } else if (roll < 0.5) {
-        const target = pick(engine.view());
-        if (target) await engine.renameTodo(target.id, `Renamed ${++counter}`);
+        const target = pick(listTodos(engine));
+        if (target) await renameTodo(engine, target.id, `Renamed ${++counter}`);
       } else if (roll < 0.57) {
-        const target = pick(engine.view());
-        if (target) await engine.abandonTodos([target.id]);
+        const target = pick(listTodos(engine));
+        if (target) await abandonTodos(engine, [target.id]);
       } else if (roll < 0.62) {
-        await engine.abandonTodos(
-          engine
-            .view()
+        await abandonTodos(
+          engine,
+          listTodos(engine)
             .slice(0, 2)
             .map((todo) => todo.id),
         );
@@ -128,13 +148,13 @@ describe('devices that work independently', () => {
     expect(server.ids.size).toBeGreaterThan(10);
     for (const { engine } of devices) {
       expect(engine.status()).toEqual({ pending: 0, syncing: false, connected: true });
-      expect(engine.view()).toEqual(server.visible);
+      expect(listTodos(engine)).toEqual(server.visible);
     }
 
     // Nothing the server accepted went missing: every To-Do made is there unless it was refused.
     const refused = new Set(
       devices.flatMap(({ engine }) =>
-        engine.rejections().map((r) => (r.op.kind === 'create_todo' ? r.op.itemId : '')),
+        engine.rejections().map((r) => (r.op.kind === 'create' ? r.op.itemId : '')),
       ),
     );
     for (const id of created) expect(refused.has(id) || server.ids.has(id)).toBe(true);

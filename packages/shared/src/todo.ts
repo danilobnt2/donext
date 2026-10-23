@@ -1,3 +1,5 @@
+import type { EntityItem, EntitySchema } from './entity';
+
 /** Longest To-Do title accepted, in characters (Unicode code points). */
 export const TITLE_MAX_LENGTH = 500;
 
@@ -34,4 +36,47 @@ export function checkTitle(input: unknown): TitleCheck {
     return { ok: false, message: `Title must be at most ${TITLE_MAX_LENGTH} characters.` };
   }
   return { ok: true, title };
+}
+
+const TODO_STATES: readonly TodoState[] = ['new', 'active', 'pending', 'done', 'abandoned'];
+
+/** What a To-Do may contain and who may change it. The server also writes `state` itself. */
+export const todoSchema: EntitySchema = {
+  name: 'todo',
+  label: 'To-Do',
+  fields: {
+    title: {
+      create: 'required',
+      parse(value) {
+        const check = checkTitle(value);
+        return check.ok ? { ok: true, value: check.title } : check;
+      },
+    },
+    state: {
+      create: 'forbidden',
+      default: 'new',
+      deviceValues: ['abandoned'],
+      parse: (value) =>
+        TODO_STATES.includes(value as TodoState)
+          ? { ok: true, value: value as TodoState }
+          : { ok: false, message: 'Unknown state.' },
+    },
+  },
+  terminal: {
+    field: 'state',
+    value: 'abandoned',
+    message: 'This To-Do was abandoned and cannot be edited.',
+  },
+  limit: { max: TODO_LIMIT, message: 'This board is full.' },
+};
+
+export function toTodo(item: EntityItem): Todo {
+  return {
+    id: item.id,
+    title: String(item.fields.title),
+    state: item.fields.state as TodoState,
+    rev: item.rev,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
 }

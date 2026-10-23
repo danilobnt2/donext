@@ -2,11 +2,11 @@ import {
   MAX_OPS_PER_PUSH,
   TITLE_MAX_LENGTH,
   TODO_LIMIT,
+  type Fields,
   type OpResult,
   type PullResponse,
   type PushResponse,
   type SyncOp,
-  type TodoChanges,
 } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
@@ -21,9 +21,9 @@ const board = () => env.USER_STORE.getByName('shared-board');
 // Durable Object storage persists across tests in this file, so start each one empty.
 beforeEach(async () => {
   await runInDurableObject(board(), (_instance, state) => {
-    state.storage.sql.exec('DELETE FROM work_items');
-    state.storage.sql.exec('DELETE FROM work_item_revisions');
-    state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'work_item_revisions'");
+    state.storage.sql.exec('DELETE FROM entities');
+    state.storage.sql.exec('DELETE FROM entity_revisions');
+    state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'entity_revisions'");
   });
 });
 
@@ -31,16 +31,19 @@ let counter = 0;
 const opId = () => `op-${++counter}`;
 const NOW = '2026-10-23T10:00:00.000Z';
 
-const create = (title: string, itemId = ulid()): SyncOp => ({
-  kind: 'create_todo',
+const createItem = (entity: string, fields: Fields, itemId = ulid()): SyncOp => ({
+  kind: 'create',
   opId: opId(),
+  entity,
   itemId,
-  title,
+  fields,
   clientChangedAt: NOW,
 });
 
-const update = (itemId: string, changes: TodoChanges, baseRev = 1): SyncOp => ({
-  kind: 'update_todo',
+const create = (title: string, itemId = ulid()): SyncOp => createItem('todo', { title }, itemId);
+
+const update = (itemId: string, changes: Fields, baseRev = 1): SyncOp => ({
+  kind: 'update',
   opId: opId(),
   itemId,
   baseRev,
@@ -78,11 +81,11 @@ describe('creating', () => {
     const result = await pushOne(create('  Cut the lawn ', itemId));
     expect(result).toMatchObject({ status: 'applied', revision: { seq: 1, itemId, rev: 1 } });
     if (result.status === 'rejected') throw new Error('unexpected rejection');
-    expect(result.revision?.todo).toMatchObject({
+    expect(result.revision?.item).toMatchObject({
       id: itemId,
-      title: 'Cut the lawn',
-      state: 'new',
+      entity: 'todo',
       rev: 1,
+      fields: { title: 'Cut the lawn', state: 'new' },
     });
     expect(result.revision?.changedFields).toEqual(['title', 'state']);
   });
@@ -92,7 +95,7 @@ describe('creating', () => {
     const results = await push([create('Cut', itemId), update(itemId, { title: 'Cut the lawn' })]);
     expect(results.map((r) => r.status)).toEqual(['applied', 'applied']);
     const { revisions } = await pull();
-    expect(revisions.map((r) => [r.seq, r.rev, r.todo.title])).toEqual([
+    expect(revisions.map((r) => [r.seq, r.rev, r.item.fields.title])).toEqual([
       [1, 1, 'Cut'],
       [2, 2, 'Cut the lawn'],
     ]);
@@ -103,7 +106,7 @@ describe('creating', () => {
     const sources = await runInDurableObject(board(), (_instance, state) =>
       state.storage.sql
         .exec<{ source: string; client_changed_at: string }>(
-          'SELECT source, client_changed_at FROM work_item_revisions',
+          'SELECT source, client_changed_at FROM entity_revisions',
         )
         .toArray(),
     );
@@ -116,7 +119,7 @@ describe('creating', () => {
   ])('rejects %s', async (_, title) => {
     expect(await pushOne(create(title))).toMatchObject({
       status: 'rejected',
-      reason: 'invalid_title',
+      reason: 'invalid_field',
     });
     expect((await pull()).revisions).toEqual([]);
   });
@@ -134,20 +137,57 @@ describe('creating', () => {
     await runInDurableObject(board(), (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
-         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
+         INSERT INTO entities (id, entity, rev, created_at, updated_at, fields)
+         SELECT printf('seed%022d', i), 'todo', 1, '', '', '{"title":"seed","state":"new"}' FROM n`,
         TODO_LIMIT,
       );
     });
     expect(await pushOne(create('One too many'))).toMatchObject({
       status: 'rejected',
-      reason: 'todo_limit_reached',
+      reason: 'limit_reached',
     });
 
     await runInDurableObject(board(), (_instance, state) => {
-      state.storage.sql.exec("UPDATE work_items SET state = 'abandoned' WHERE id LIKE 'seed%1'");
+      state.storage.sql.exec(
+        `UPDATE entities SET fields = '{"title":"seed","state":"abandoned"}' WHERE id LIKE 'seed%1'`,
+      );
     });
     expect(await pushOne(create('Room again'))).toMatchObject({ status: 'applied' });
+  });
+});
+
+describe('what the schemas decide', () => {
+  it('rejects a kind of item nobody defined', async () => {
+    expect(await pushOne(createItem('unheardof', { title: 'x' }))).toMatchObject({
+      status: 'rejected',
+      reason: 'unknown_entity',
+    });
+  });
+
+  it('rejects fields a To-Do does not have, or that only the server writes', async () => {
+    expect(await pushOne(createItem('todo', { title: 'x', colour: 'red' }))).toMatchObject({
+      reason: 'invalid_field',
+      message: 'A To-Do has no field “colour”.',
+    });
+    expect(await pushOne(createItem('todo', { title: 'x', state: 'done' }))).toMatchObject({
+      reason: 'invalid_field',
+    });
+    expect(await pushOne(createItem('todo', {}))).toMatchObject({
+      reason: 'invalid_field',
+      message: 'title is required.',
+    });
+  });
+
+  it('lets a device abandon a To-Do but not mark it with a state the server owns', async () => {
+    const itemId = ulid();
+    await pushOne(create('Cut', itemId));
+    expect(await pushOne(update(itemId, { state: 'active' }))).toMatchObject({
+      reason: 'invalid_field',
+      message: 'state cannot be set to that value.',
+    });
+    expect(await pushOne(update(itemId, { state: 'abandoned' }))).toMatchObject({
+      status: 'applied',
+    });
   });
 });
 
@@ -174,7 +214,10 @@ describe('updating', () => {
       revision: { seq: 2, rev: 2, changedFields: ['title'] },
     });
     const { revisions } = await pull();
-    expect(revisions.at(-1)?.todo).toMatchObject({ title: 'Cut the lawn', rev: 2, state: 'new' });
+    expect(revisions.at(-1)?.item).toMatchObject({
+      rev: 2,
+      fields: { title: 'Cut the lawn', state: 'new' },
+    });
   });
 
   it('does not record a revision for a change that changes nothing', async () => {
@@ -193,14 +236,15 @@ describe('updating', () => {
     await pushOne(create('Cut', itemId));
     const result = await pushOne(update(itemId, { state: 'abandoned' }));
     expect(result).toMatchObject({ revision: { changedFields: ['state'] } });
-    expect((await pull()).revisions.at(-1)?.todo.state).toBe('abandoned');
+    expect((await pull()).revisions.at(-1)?.item.fields.state).toBe('abandoned');
   });
 
   it('rejects an invalid new title and an unknown To-Do', async () => {
     const itemId = ulid();
     await pushOne(create('Cut', itemId));
     expect(await pushOne(update(itemId, { title: '' }))).toMatchObject({
-      reason: 'invalid_title',
+      reason: 'invalid_field',
+      message: 'Title is required.',
     });
     expect(await pushOne(update(ulid(), { title: 'x' }))).toMatchObject({
       reason: 'unknown_item',
@@ -216,10 +260,9 @@ describe('devices that diverge', () => {
     await pushOne(update(itemId, { title: 'Cut the lawn' }, 1), 'laptop');
     const result = await pushOne(update(itemId, { state: 'abandoned' }, 1), 'phone');
     expect(result).toMatchObject({ status: 'applied', revision: { rev: 3 } });
-    expect((await pull()).revisions.at(-1)?.todo).toMatchObject({
-      title: 'Cut the lawn',
-      state: 'abandoned',
+    expect((await pull()).revisions.at(-1)?.item).toMatchObject({
       rev: 3,
+      fields: { title: 'Cut the lawn', state: 'abandoned' },
     });
   });
 
@@ -230,12 +273,12 @@ describe('devices that diverge', () => {
     await pushOne(update(itemId, { title: 'From the phone' }, 1), 'phone');
 
     const { revisions } = await pull();
-    expect(revisions.map((r) => r.todo.title)).toEqual([
+    expect(revisions.map((r) => r.item.fields.title)).toEqual([
       'Cut',
       'From the laptop',
       'From the phone',
     ]);
-    expect(revisions.at(-1)?.todo.rev).toBe(3);
+    expect(revisions.at(-1)?.item.rev).toBe(3);
   });
 
   it('refuses edits to a To-Do abandoned elsewhere, but accepts abandoning it twice', async () => {
@@ -245,7 +288,7 @@ describe('devices that diverge', () => {
 
     expect(await pushOne(update(itemId, { title: 'Late edit' }), 'phone')).toMatchObject({
       status: 'rejected',
-      reason: 'item_abandoned',
+      reason: 'item_locked',
     });
     expect(await pushOne(update(itemId, { state: 'abandoned' }), 'phone')).toMatchObject({
       status: 'applied',
@@ -259,7 +302,14 @@ describe('a push', () => {
   it('answers each change on its own, so one bad change does not sink the rest', async () => {
     const results = await push([
       create('Good'),
-      { kind: 'create_todo', opId: 'bad-op', itemId: 'nope', title: 'x', clientChangedAt: NOW },
+      {
+        kind: 'create',
+        opId: 'bad-op',
+        entity: 'todo',
+        itemId: 'nope',
+        fields: {},
+        clientChangedAt: NOW,
+      },
       'not even an object',
       create('Also good'),
     ]);

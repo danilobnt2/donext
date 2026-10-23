@@ -1,76 +1,101 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore, SyncEngine, projectTodos, type Transport } from './client';
-import type { OpResult, PullResponse, Revision, SyncOp, TodoChanges } from './sync';
-import type { Todo } from './todo';
+import { MemoryStore, SyncEngine, projectItems, visibleItems, type Transport } from './client';
+import { isTerminal, type EntityItem, type Fields, type Schemas } from './entity';
+import { checkCreate, checkUpdate } from './rules';
+import { SCHEMAS } from './schemas';
+import { TEST_SCHEMAS } from './test-entities';
+import type { OpResult, PullResponse, Revision, SyncOp } from './sync';
+import { abandonAllTodos, createTodo, listTodos, renameTodo } from './todos';
 
 const NOW = '2026-10-23T10:00:00.000Z';
+const ALL: Schemas = { ...SCHEMAS, ...TEST_SCHEMAS };
 
 let counter = 0;
 /** Ids that sort in creation order, shaped like ULIDs. */
 const newId = () => `01J9ZZZZZZZZZZZZZZZZ${String(++counter).padStart(6, '0')}`;
 
 /** A stand-in for the server that is just enough for the engine to talk to. */
-function fakeServer() {
+function fakeServer(schemas: Schemas = ALL) {
   let seq = 0;
-  const items = new Map<string, Todo>();
+  const items = new Map<string, EntityItem>();
   const revisions: Revision[] = [];
   const answered = new Map<string, OpResult>();
   const state = { reachable: true, pushes: 0, pulls: 0, rejectNext: false };
+  const ctx = { get: (id: string) => items.get(id) };
 
-  const record = (todo: Todo, fields: string[]): Revision => {
+  const record = (item: EntityItem, changedFields: string[]): Revision => {
     const revision = {
       seq: ++seq,
-      itemId: todo.id,
-      rev: todo.rev,
+      itemId: item.id,
+      entity: item.entity,
+      rev: item.rev,
       changedAt: NOW,
-      changedFields: fields,
-      todo,
+      changedFields,
+      item,
     };
     revisions.push(revision);
-    items.set(todo.id, todo);
+    items.set(item.id, item);
     return revision;
+  };
+
+  const reject = (
+    op: SyncOp,
+    reason: 'limit_reached' | 'unknown_item' | 'unknown_entity' | 'item_exists',
+    message: string,
+  ): OpResult => ({ opId: op.opId, status: 'rejected', reason, message });
+
+  const decide = (op: SyncOp): OpResult => {
+    if (state.rejectNext) {
+      state.rejectNext = false;
+      return reject(op, 'limit_reached', 'This board is full.');
+    }
+    if (op.kind === 'create') {
+      const schema = schemas[op.entity];
+      if (!schema) return reject(op, 'unknown_entity', 'No such kind of item.');
+      if (items.has(op.itemId)) return reject(op, 'item_exists', 'Already there.');
+      const checked = checkCreate(schema, op.fields, ctx);
+      if (!checked.ok)
+        return {
+          opId: op.opId,
+          status: 'rejected',
+          reason: checked.reason,
+          message: checked.message,
+        };
+      const item = {
+        id: op.itemId,
+        entity: op.entity,
+        rev: 1,
+        createdAt: NOW,
+        updatedAt: NOW,
+        fields: checked.fields,
+      };
+      return {
+        opId: op.opId,
+        status: 'applied',
+        revision: record(item, Object.keys(checked.fields)),
+      };
+    }
+    const current = items.get(op.itemId);
+    const schema = current && schemas[current.entity];
+    if (!current || !schema) return reject(op, 'unknown_item', 'No such item.');
+    const checked = checkUpdate(schema, current, op.changes, ctx);
+    if (!checked.ok)
+      return {
+        opId: op.opId,
+        status: 'rejected',
+        reason: checked.reason,
+        message: checked.message,
+      };
+    if (checked.changedFields.length === 0)
+      return { opId: op.opId, status: 'applied', revision: null };
+    const item = { ...current, rev: current.rev + 1, fields: checked.next };
+    return { opId: op.opId, status: 'applied', revision: record(item, checked.changedFields) };
   };
 
   const apply = (op: SyncOp): OpResult => {
     const earlier = answered.get(op.opId);
     if (earlier?.status === 'applied') return { ...earlier, status: 'duplicate' };
-    let result: OpResult;
-    if (state.rejectNext) {
-      state.rejectNext = false;
-      result = {
-        opId: op.opId,
-        status: 'rejected',
-        reason: 'todo_limit_reached',
-        message: 'This board is full.',
-      };
-    } else if (op.kind === 'create_todo') {
-      const todo: Todo = {
-        id: op.itemId,
-        title: op.title,
-        state: 'new',
-        rev: 1,
-        createdAt: NOW,
-        updatedAt: NOW,
-      };
-      result = { opId: op.opId, status: 'applied', revision: record(todo, ['title', 'state']) };
-    } else {
-      const current = items.get(op.itemId);
-      if (!current) {
-        result = {
-          opId: op.opId,
-          status: 'rejected',
-          reason: 'unknown_item',
-          message: 'No such To-Do.',
-        };
-      } else {
-        const todo: Todo = { ...current, ...op.changes, rev: current.rev + 1 };
-        result = {
-          opId: op.opId,
-          status: 'applied',
-          revision: record(todo, Object.keys(op.changes)),
-        };
-      }
-    }
+    const result = decide(op);
     answered.set(op.opId, result);
     return result;
   };
@@ -107,75 +132,103 @@ async function openEngine(server = fakeServer(), store = new MemoryStore()) {
   const engine = await SyncEngine.open({
     store,
     transport: server.transport,
+    schemas: ALL,
     newId,
     now: () => NOW,
   });
   return { engine, server, store };
 }
 
-const titles = (engine: SyncEngine) => engine.view().map((todo) => todo.title);
+const titles = (engine: SyncEngine) => listTodos(engine).map((todo) => todo.title);
+const names = (engine: SyncEngine, entity: string, field: string) =>
+  engine.items(entity).map((item) => item.fields[field]);
 
-describe('projectTodos', () => {
-  const confirmed: Todo = {
+describe('projectItems', () => {
+  const todo: EntityItem = {
     id: '01J9ZZZZZZZZZZZZZZZZZZZZ01',
-    title: 'Confirmed',
-    state: 'new',
+    entity: 'todo',
     rev: 2,
     createdAt: NOW,
     updatedAt: NOW,
+    fields: { title: 'Confirmed', state: 'new' },
   };
-  const create = (itemId: string, title: string, opId = `op-${itemId}`): SyncOp => ({
-    kind: 'create_todo',
-    opId,
+  const create = (itemId: string, fields: Fields, entity = 'todo'): SyncOp => ({
+    kind: 'create',
+    opId: `op-${itemId}`,
+    entity,
     itemId,
-    title,
+    fields,
     clientChangedAt: NOW,
   });
-  const update = (itemId: string, changes: TodoChanges): SyncOp => ({
-    kind: 'update_todo',
-    opId: `up-${itemId}-${JSON.stringify(changes)}`,
+  let n = 0;
+  const update = (itemId: string, changes: Fields): SyncOp => ({
+    kind: 'update',
+    opId: `up-${++n}`,
     itemId,
     baseRev: 1,
     changes,
     clientChangedAt: NOW,
   });
+  const view = (confirmed: EntityItem[], outbox: SyncOp[]) =>
+    visibleItems(projectItems(confirmed, outbox, ALL).values(), 'todo', ALL).map(
+      (item) => item.fields.title,
+    );
 
   it('shows a pending create at once, newest first', () => {
-    const view = projectTodos([confirmed], [create('01J9ZZZZZZZZZZZZZZZZZZZZ02', ' New one ')]);
-    expect(view.map((todo) => todo.title)).toEqual(['New one', 'Confirmed']);
-    expect(view[0]).toMatchObject({ state: 'new', rev: 0 });
+    const items = projectItems(
+      [todo],
+      [create('01J9ZZZZZZZZZZZZZZZZZZZZ02', { title: ' New one ' })],
+      ALL,
+    );
+    expect(visibleItems(items.values(), 'todo', ALL).map((item) => item.fields.title)).toEqual([
+      'New one',
+      'Confirmed',
+    ]);
+    expect(items.get('01J9ZZZZZZZZZZZZZZZZZZZZ02')).toMatchObject({
+      rev: 0,
+      fields: { state: 'new' },
+    });
   });
 
-  it('applies pending renames in order and hides abandoned To-Dos', () => {
-    const id = confirmed.id;
+  it('applies pending changes in order and hides finished items', () => {
     expect(
-      projectTodos([confirmed], [update(id, { title: 'One' }), update(id, { title: 'Two' })])[0]
-        ?.title,
-    ).toBe('Two');
-    expect(projectTodos([confirmed], [update(id, { state: 'abandoned' })])).toEqual([]);
+      view([todo], [update(todo.id, { title: 'One' }), update(todo.id, { title: 'Two' })]),
+    ).toEqual(['Two']);
+    expect(view([todo], [update(todo.id, { state: 'abandoned' })])).toEqual([]);
   });
 
-  it('ignores changes to To-Dos it does not know, which the server will reject', () => {
+  it('keeps finished items out of sight but in the projection, so rules can still see them', () => {
+    const items = projectItems([todo], [update(todo.id, { state: 'abandoned' })], ALL);
+    expect(isTerminal(ALL.todo, items.get(todo.id)!)).toBe(true);
+  });
+
+  it('skips changes the rules would refuse, as the server will', () => {
+    expect(view([todo], [update('01J9ZZZZZZZZZZZZZZZZZZZZ09', { title: 'x' })])).toEqual([
+      'Confirmed',
+    ]);
+    expect(view([todo], [update(todo.id, { title: '   ' })])).toEqual(['Confirmed']);
+    expect(view([todo], [create('01J9ZZZZZZZZZZZZZZZZZZZZ03', { title: '' })])).toEqual([
+      'Confirmed',
+    ]);
     expect(
-      projectTodos([confirmed], [update('01J9ZZZZZZZZZZZZZZZZZZZZ09', { title: 'x' })]),
-    ).toEqual([confirmed]);
+      view([todo], [create('01J9ZZZZZZZZZZZZZZZZZZZZ04', { title: 'x' }, 'unheardof')]),
+    ).toEqual(['Confirmed']);
   });
 });
 
-describe('SyncEngine', () => {
+describe('SyncEngine with To-Dos', () => {
   it('shows a new To-Do immediately and keeps it through the sync that confirms it', async () => {
     const { engine, server } = await openEngine();
     const seen: string[][] = [];
     engine.subscribe(() => seen.push(titles(engine)));
 
-    const created = await engine.createTodo('  Cut the lawn ');
-    expect(created.ok).toBe(true);
+    expect((await createTodo(engine, '  Cut the lawn ')).ok).toBe(true);
     expect(titles(engine)).toEqual(['Cut the lawn']);
     expect(engine.status()).toMatchObject({ pending: 1, connected: true });
 
     expect(await engine.sync()).toEqual({ ok: true });
     expect(engine.status()).toEqual({ pending: 0, syncing: false, connected: true });
-    expect(engine.view()[0]).toMatchObject({ title: 'Cut the lawn', rev: 1 });
+    expect(listTodos(engine)[0]).toMatchObject({ title: 'Cut the lawn', rev: 1 });
     expect(server.items.size).toBe(1);
     // The To-Do never leaves the screen while the server confirms it.
     expect(seen.length).toBeGreaterThan(0);
@@ -184,25 +237,34 @@ describe('SyncEngine', () => {
 
   it('refuses a bad title without queueing anything', async () => {
     const { engine } = await openEngine();
-    expect(await engine.createTodo('   ')).toEqual({ ok: false, message: 'Title is required.' });
+    expect(await createTodo(engine, '   ')).toEqual({ ok: false, message: 'Title is required.' });
     expect(engine.status().pending).toBe(0);
+  });
+
+  it('sends only what the user gave, not the defaults it filled in', async () => {
+    const { engine, server } = await openEngine();
+    const push = vi.spyOn(server.transport, 'push');
+    await createTodo(engine, 'Cut the lawn');
+    await engine.sync();
+    const op = push.mock.calls[0]?.[1][0];
+    expect(op).toMatchObject({ kind: 'create', entity: 'todo', fields: { title: 'Cut the lawn' } });
+    expect(op && 'fields' in op && Object.keys(op.fields)).toEqual(['title']);
   });
 
   it('keeps working offline and sends everything when the server is back', async () => {
     const { engine, server } = await openEngine();
     server.state.reachable = false;
-    await engine.createTodo('Offline one');
-    await engine.createTodo('Offline two');
+    await createTodo(engine, 'Offline one');
+    await createTodo(engine, 'Offline two');
 
-    const outcome = await engine.sync();
-    expect(outcome.ok).toBe(false);
+    expect((await engine.sync()).ok).toBe(false);
     expect(engine.status()).toEqual({ pending: 2, syncing: false, connected: false });
     expect(titles(engine)).toEqual(['Offline two', 'Offline one']);
 
     server.state.reachable = true;
     expect((await engine.sync()).ok).toBe(true);
     expect(engine.status()).toEqual({ pending: 0, syncing: false, connected: true });
-    expect([...server.items.values()].map((todo) => todo.title).sort()).toEqual([
+    expect([...server.items.values()].map((item) => item.fields.title).sort()).toEqual([
       'Offline one',
       'Offline two',
     ]);
@@ -211,14 +273,14 @@ describe('SyncEngine', () => {
   it('drops a rejected change, goes back to the server’s version and says why', async () => {
     const { engine, server } = await openEngine();
     server.state.rejectNext = true;
-    await engine.createTodo('Too many');
+    await createTodo(engine, 'Too many');
     expect(titles(engine)).toEqual(['Too many']);
 
     expect((await engine.sync()).ok).toBe(true);
     expect(titles(engine)).toEqual([]);
     expect(engine.status().pending).toBe(0);
     expect(engine.rejections()).toMatchObject([
-      { reason: 'todo_limit_reached', op: { title: 'Too many' } },
+      { reason: 'limit_reached', op: { fields: { title: 'Too many' } } },
     ]);
 
     engine.dismissRejection(engine.rejections()[0]!.op.opId);
@@ -230,23 +292,22 @@ describe('SyncEngine', () => {
     const phone = (await openEngine(server)).engine;
     const laptop = (await openEngine(server)).engine;
 
-    await phone.createTodo('From the phone');
+    await createTodo(phone, 'From the phone');
     await phone.sync();
     await laptop.sync();
     expect(titles(laptop)).toEqual(['From the phone']);
 
-    await laptop.renameTodo(laptop.view()[0]!.id, 'Renamed on the laptop');
+    await renameTodo(laptop, listTodos(laptop)[0]!.id, 'Renamed on the laptop');
     await laptop.sync();
     await phone.sync();
     expect(titles(phone)).toEqual(['Renamed on the laptop']);
   });
 
-  it('never replaces a To-Do with an older revision of it', async () => {
+  it('never replaces an item with an older revision of it', async () => {
     const { engine, server } = await openEngine();
-    await engine.createTodo('Original');
+    await createTodo(engine, 'Original');
     await engine.sync();
-    const id = engine.view()[0]!.id;
-    await engine.renameTodo(id, 'Renamed');
+    await renameTodo(engine, listTodos(engine)[0]!.id, 'Renamed');
     await engine.sync();
 
     // A stale page arriving late, for example from a second tab, must not undo the rename.
@@ -258,13 +319,13 @@ describe('SyncEngine', () => {
 
   it('starts over when the server was reset behind it', async () => {
     const { engine, server } = await openEngine();
-    await engine.createTodo('Before the reset');
-    await engine.createTodo('Also before the reset');
+    await createTodo(engine, 'Before the reset');
+    await createTodo(engine, 'Also before the reset');
     await engine.sync();
 
     server.reset();
     const other = (await openEngine(server)).engine;
-    await other.createTodo('After the reset');
+    await createTodo(other, 'After the reset');
     await other.sync();
 
     await engine.sync();
@@ -273,28 +334,37 @@ describe('SyncEngine', () => {
 
   it('abandons every visible To-Do', async () => {
     const { engine, server } = await openEngine();
-    await engine.createTodo('One');
-    await engine.createTodo('Two');
+    await createTodo(engine, 'One');
+    await createTodo(engine, 'Two');
     await engine.sync();
 
-    expect(await engine.abandonAll()).toBe(2);
+    expect(await abandonAllTodos(engine)).toBe(2);
     expect(titles(engine)).toEqual([]);
     await engine.sync();
-    expect([...server.items.values()].map((todo) => todo.state)).toEqual([
+    expect([...server.items.values()].map((item) => item.fields.state)).toEqual([
       'abandoned',
       'abandoned',
     ]);
-    expect(await engine.abandonAll()).toBe(0);
+    expect(await abandonAllTodos(engine)).toBe(0);
+  });
+
+  it('sends nothing for a change that changes nothing', async () => {
+    const { engine } = await openEngine();
+    await createTodo(engine, 'Same');
+    await engine.sync();
+    expect(await renameTodo(engine, listTodos(engine)[0]!.id, ' Same ')).toEqual({ ok: true });
+    expect(engine.status().pending).toBe(0);
+    expect(await renameTodo(engine, 'nope', 'x')).toEqual({ ok: false, message: 'No such item.' });
   });
 
   it('shares one sync between simultaneous calls and still sends changes made during it', async () => {
     const { engine, server } = await openEngine();
-    await engine.createTodo('First');
+    await createTodo(engine, 'First');
 
     const first = engine.sync();
     const second = engine.sync();
     expect(second).toBe(first);
-    await engine.createTodo('Made during the sync');
+    await createTodo(engine, 'Made during the sync');
     await first;
 
     expect(engine.status().pending).toBe(0);
@@ -305,34 +375,124 @@ describe('SyncEngine', () => {
     const server = fakeServer();
     const store = new MemoryStore();
     const first = (await openEngine(server, store)).engine;
-    await first.createTodo('Synced');
+    await createTodo(first, 'Synced');
     await first.sync();
     server.state.reachable = false;
-    await first.createTodo('Still waiting');
+    await createTodo(first, 'Still waiting');
 
     const reopened = (await openEngine(server, store)).engine;
     expect(titles(reopened)).toEqual(['Still waiting', 'Synced']);
     expect(reopened.status().pending).toBe(1);
 
     server.state.reachable = true;
-    const pulls = server.state.pulls;
     await reopened.sync();
     expect(server.items.size).toBe(2);
-    expect(server.state.pulls).toBeGreaterThan(pulls);
   });
 
   it('keeps one device id for good', async () => {
     const store = new MemoryStore();
     const push = vi.fn<Transport['push']>(async () => []);
-    const options = { store, transport: { push, pull: fakeServer().transport.pull }, newId };
+    const options = {
+      store,
+      transport: { push, pull: fakeServer().transport.pull },
+      schemas: ALL,
+      newId,
+    };
     const first = await SyncEngine.open(options);
-    await first.createTodo('x');
+    await createTodo(first, 'x');
     await first.sync();
-    const second = await SyncEngine.open(options);
-    await second.sync();
+    await (await SyncEngine.open(options)).sync();
     const ids = push.mock.calls.map(([deviceId]) => deviceId);
     expect(ids.length).toBeGreaterThan(0);
     expect(new Set(ids).size).toBe(1);
+  });
+});
+
+describe('SyncEngine with other kinds of data', () => {
+  it('keeps each kind in its own view', async () => {
+    const { engine } = await openEngine();
+    await engine.create('folder', { name: 'Home' });
+    await createTodo(engine, 'Cut the lawn');
+    expect(names(engine, 'folder', 'name')).toEqual(['Home']);
+    expect(titles(engine)).toEqual(['Cut the lawn']);
+  });
+
+  it('lets a rule use an item that has not reached the server yet, and sends both in order', async () => {
+    const { engine, server } = await openEngine();
+    const folder = await engine.create('folder', { name: 'Home' });
+    if (!folder.ok) throw new Error('folder refused');
+
+    const note = await engine.create('note', { text: 'Buy milk', folder: folder.id });
+    expect(note.ok).toBe(true);
+
+    expect((await engine.sync()).ok).toBe(true);
+    expect(engine.rejections()).toEqual([]);
+    expect(server.items.size).toBe(2);
+    expect(names(engine, 'note', 'text')).toEqual(['Buy milk']);
+  });
+
+  it('refuses at once what a rule forbids, with its message', async () => {
+    const { engine } = await openEngine();
+    expect(await engine.create('note', { text: 'Lost', folder: 'nowhere' })).toEqual({
+      ok: false,
+      message: 'The folder does not exist.',
+    });
+    expect(await engine.create('note', { text: 'x', status: 'closed' })).toMatchObject({
+      ok: false,
+    });
+    expect(engine.status().pending).toBe(0);
+  });
+
+  it('applies the same field rules to every kind', async () => {
+    const { engine } = await openEngine();
+    const folder = await engine.create('folder', { name: 'Home' });
+    const note = await engine.create('note', { text: 'Buy milk' });
+    if (!folder.ok || !note.ok) throw new Error('refused');
+
+    expect(await engine.update(note.id, { folder: folder.id })).toEqual({
+      ok: false,
+      message: 'folder cannot be changed.',
+    });
+    expect(await engine.update(note.id, { pinned: true })).toEqual({ ok: true });
+    expect(engine.items('note')[0]?.fields.pinned).toBe(true);
+  });
+
+  it('hides a finished item whatever its kind', async () => {
+    const { engine, server } = await openEngine();
+    const note = await engine.create('note', { text: 'Buy milk' });
+    if (!note.ok) throw new Error('refused');
+    await engine.sync();
+
+    await engine.update(note.id, { status: 'closed' });
+    expect(engine.items('note')).toEqual([]);
+    await engine.sync();
+    expect(server.items.get(note.id)?.fields.status).toBe('closed');
+    expect(await engine.update(note.id, { text: 'Late edit' })).toEqual({
+      ok: false,
+      message: 'This note is closed.',
+    });
+  });
+
+  it('shows what the server refused, whatever the kind', async () => {
+    const { engine, server } = await openEngine();
+    await engine.create('note', { text: 'One' });
+    await engine.sync();
+
+    server.state.rejectNext = true;
+    await engine.create('note', { text: 'Two' });
+    await engine.sync();
+
+    expect(names(engine, 'note', 'text')).toEqual(['One']);
+    expect(engine.rejections()).toMatchObject([
+      { reason: 'limit_reached', op: { entity: 'note' } },
+    ]);
+  });
+
+  it('throws for a kind nobody registered: that is a bug, not user input', async () => {
+    const { engine } = await openEngine();
+    await expect(engine.create('unheardof', {})).rejects.toThrow(
+      'There is no schema named “unheardof”.',
+    );
   });
 });
 

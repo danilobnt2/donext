@@ -1,4 +1,4 @@
-import type { SyncOp, Todo } from '@donext/shared';
+import type { EntityItem, SyncOp } from '@donext/shared';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IdbStore } from './idb-store';
@@ -10,20 +10,21 @@ beforeEach(() => {
 
 const open = () => IdbStore.open('test', factory);
 
-const todo = (id: string, rev: number, title = id): Todo => ({
+const item = (id: string, rev: number, title = id): EntityItem => ({
   id,
-  title,
-  state: 'new',
+  entity: 'todo',
   rev,
   createdAt: '2026-10-23T10:00:00.000Z',
   updatedAt: '2026-10-23T10:00:00.000Z',
+  fields: { title, state: 'new' },
 });
 
 const op = (opId: string): SyncOp => ({
-  kind: 'create_todo',
+  kind: 'create',
   opId,
+  entity: 'todo',
   itemId: `item-${opId}`,
-  title: opId,
+  fields: { title: opId },
   clientChangedAt: '2026-10-23T10:00:00.000Z',
 });
 
@@ -32,7 +33,7 @@ describe('IdbStore', () => {
     expect(await (await open()).load()).toEqual({
       deviceId: null,
       cursor: 0,
-      todos: [],
+      items: [],
       outbox: [],
     });
   });
@@ -41,7 +42,7 @@ describe('IdbStore', () => {
     const store = await open();
     await store.commit({
       deviceId: 'dev-1',
-      put: [todo('a', 1)],
+      put: [item('a', 1)],
       addOps: [op('o1')],
       cursor: 4,
     });
@@ -50,7 +51,7 @@ describe('IdbStore', () => {
     expect(await reopened.load()).toEqual({
       deviceId: 'dev-1',
       cursor: 4,
-      todos: [todo('a', 1)],
+      items: [item('a', 1)],
       outbox: [op('o1')],
     });
   });
@@ -65,14 +66,14 @@ describe('IdbStore', () => {
     expect((await store.load()).outbox.map((o) => o.opId)).toEqual(['o3', 'o2']);
   });
 
-  it('never replaces a To-Do with an older revision of it', async () => {
+  it('never replaces an item with an older revision of it', async () => {
     const store = await open();
-    await store.commit({ put: [todo('a', 3, 'Third')] });
-    await store.commit({ put: [todo('a', 2, 'Second')] });
-    expect((await store.load()).todos).toEqual([todo('a', 3, 'Third')]);
+    await store.commit({ put: [item('a', 3, 'Third')] });
+    await store.commit({ put: [item('a', 2, 'Second')] });
+    expect((await store.load()).items).toEqual([item('a', 3, 'Third')]);
 
-    await store.commit({ put: [todo('a', 3, 'Third again')] });
-    expect((await store.load()).todos[0]?.title).toBe('Third again');
+    await store.commit({ put: [item('a', 3, 'Third again')] });
+    expect((await store.load()).items[0]?.fields.title).toBe('Third again');
   });
 
   it('moves the cursor forward only, and clearing resets it', async () => {
@@ -81,22 +82,22 @@ describe('IdbStore', () => {
     await store.commit({ cursor: 3 });
     expect((await store.load()).cursor).toBe(5);
 
-    await store.commit({ clear: true, put: [todo('b', 1)], cursor: 2 });
-    expect(await store.load()).toMatchObject({ cursor: 2, todos: [todo('b', 1)] });
+    await store.commit({ clear: true, put: [item('b', 1)], cursor: 2 });
+    expect(await store.load()).toMatchObject({ cursor: 2, items: [item('b', 1)] });
   });
 
   it('applies a commit entirely or not at all', async () => {
     const store = await open();
-    await store.commit({ put: [todo('kept', 1)], cursor: 1 });
+    await store.commit({ put: [item('kept', 1)], cursor: 1 });
 
-    const unstorable = { ...todo('bad', 1), notStorable: () => {} };
+    const unstorable = { ...item('bad', 1), notStorable: () => {} };
     await expect(
-      store.commit({ put: [todo('new', 1), unstorable], addOps: [op('o1')], cursor: 9 }),
+      store.commit({ put: [item('new', 1), unstorable], addOps: [op('o1')], cursor: 9 }),
     ).rejects.toThrow();
 
     expect(await store.load()).toMatchObject({
       cursor: 1,
-      todos: [todo('kept', 1)],
+      items: [item('kept', 1)],
       outbox: [],
     });
   });

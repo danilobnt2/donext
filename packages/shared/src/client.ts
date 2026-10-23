@@ -1,31 +1,33 @@
+import { isTerminal } from './entity';
+import type { EntityItem, Fields, Schemas } from './entity';
+import { checkCreate, checkUpdate } from './rules';
 import { MAX_OPS_PER_PUSH, MAX_PULL_LIMIT } from './sync';
 import type { OpResult, PullResponse, RejectReason, SyncOp } from './sync';
-import { checkTitle } from './todo';
-import type { Todo } from './todo';
 
 /*
- * The client side of sync. A device keeps two things: the To-Dos the server last confirmed, and
- * an outbox of changes the server has not seen yet. What the user sees is the confirmed To-Dos
+ * The client side of sync. A device keeps two things: the items the server last confirmed, and
+ * an outbox of changes the server has not seen yet. What the user sees is the confirmed items
  * with the outbox applied on top. A change the server rejects is simply dropped from the
  * outbox, which puts the screen back to the server's version.
  *
- * The engine knows nothing about browsers: storage and network come in through `LocalStore`
- * and `Transport`, so it runs the same in a tab, a service worker and a test.
+ * The engine knows nothing about browsers, and nothing about what the items are: storage and
+ * network come in through `LocalStore` and `Transport`, and the meaning of the data through
+ * the schemas. It runs the same in a tab, a service worker and a test.
  */
 
 export interface StoreSnapshot {
   deviceId: string | null;
   cursor: number;
-  todos: Todo[];
+  items: EntityItem[];
   outbox: SyncOp[];
 }
 
 export interface StoreChange {
   deviceId?: string;
-  /** Forget every confirmed To-Do and reset the cursor, because the server was reset. */
+  /** Forget every confirmed item and reset the cursor, because the server was reset. */
   clear?: boolean;
-  /** Confirmed To-Dos to store. One never replaces a newer revision of the same To-Do. */
-  put?: Todo[];
+  /** Confirmed items to store. One never replaces a newer revision of the same item. */
+  put?: EntityItem[];
   addOps?: SyncOp[];
   dropOps?: string[];
   /** The cursor only moves forward: a lower value than the stored one is ignored. */
@@ -47,7 +49,8 @@ export interface Transport {
 export interface EngineOptions {
   store: LocalStore;
   transport: Transport;
-  /** Returns a fresh ULID. Used for device, operation and To-Do ids. */
+  schemas: Schemas;
+  /** Returns a fresh ULID. Used for device, operation and item ids. */
   newId: () => string;
   now?: () => string;
 }
@@ -71,38 +74,57 @@ export type SyncOutcome = { ok: true } | { ok: false; error: unknown };
 export type MutationResult = { ok: true } | { ok: false; message: string };
 export type CreateResult = { ok: true; id: string } | { ok: false; message: string };
 
-/** The To-Dos to show: the confirmed ones with the outbox applied, abandoned ones hidden. */
-export function projectTodos(confirmed: Iterable<Todo>, outbox: readonly SyncOp[]): Todo[] {
-  const todos = new Map<string, Todo>();
-  for (const todo of confirmed) todos.set(todo.id, todo);
+/**
+ * Every item as this device sees it: the confirmed ones with the outbox applied, finished
+ * items included (they stay until their own rules say otherwise). A change the rules would
+ * refuse is skipped, as the server will refuse it.
+ */
+export function projectItems(
+  confirmed: Iterable<EntityItem>,
+  outbox: readonly SyncOp[],
+  schemas: Schemas,
+): Map<string, EntityItem> {
+  const items = new Map<string, EntityItem>();
+  for (const item of confirmed) items.set(item.id, item);
+  const ctx = { get: (id: string) => items.get(id) };
 
   for (const op of outbox) {
-    if (op.kind === 'create_todo') {
-      const title = checkTitle(op.title);
-      if (!title.ok || todos.has(op.itemId)) continue;
-      todos.set(op.itemId, {
+    if (op.kind === 'create') {
+      const schema = schemas[op.entity];
+      if (!schema || items.has(op.itemId)) continue;
+      const checked = checkCreate(schema, op.fields, ctx);
+      if (!checked.ok) continue;
+      items.set(op.itemId, {
         id: op.itemId,
-        title: title.title,
-        state: 'new',
+        entity: op.entity,
         rev: 0,
         createdAt: op.clientChangedAt,
         updatedAt: op.clientChangedAt,
+        fields: checked.fields,
       });
       continue;
     }
 
-    const todo = todos.get(op.itemId);
-    if (!todo || todo.state === 'abandoned') continue;
-    const title = op.changes.title === undefined ? null : checkTitle(op.changes.title);
-    todos.set(op.itemId, {
-      ...todo,
-      title: title?.ok ? title.title : todo.title,
-      state: op.changes.state ?? todo.state,
-    });
+    const current = items.get(op.itemId);
+    const schema = current ? schemas[current.entity] : undefined;
+    if (!current || !schema) continue;
+    const checked = checkUpdate(schema, current, op.changes, ctx);
+    if (checked.ok && checked.changedFields.length > 0) {
+      items.set(op.itemId, { ...current, fields: checked.next });
+    }
   }
+  return items;
+}
 
-  return [...todos.values()]
-    .filter((todo) => todo.state !== 'abandoned')
+/** The items of one kind to show: finished ones hidden, newest first. */
+export function visibleItems(
+  items: Iterable<EntityItem>,
+  entity: string,
+  schemas: Schemas,
+): EntityItem[] {
+  const schema = schemas[entity];
+  return [...items]
+    .filter((item) => item.entity === entity && !isTerminal(schema, item))
     .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 }
 
@@ -110,14 +132,14 @@ export function projectTodos(confirmed: Iterable<Todo>, outbox: readonly SyncOp[
 export class MemoryStore implements LocalStore {
   private deviceId: string | null = null;
   private cursor = 0;
-  private todos = new Map<string, Todo>();
+  private items = new Map<string, EntityItem>();
   private outbox: SyncOp[] = [];
 
   async load(): Promise<StoreSnapshot> {
     return {
       deviceId: this.deviceId,
       cursor: this.cursor,
-      todos: [...this.todos.values()],
+      items: [...this.items.values()],
       outbox: [...this.outbox],
     };
   }
@@ -125,11 +147,11 @@ export class MemoryStore implements LocalStore {
   async commit(change: StoreChange): Promise<void> {
     if (change.deviceId !== undefined) this.deviceId = change.deviceId;
     if (change.clear) {
-      this.todos.clear();
+      this.items.clear();
       this.cursor = 0;
     }
-    for (const todo of change.put ?? []) {
-      if (todo.rev >= (this.todos.get(todo.id)?.rev ?? 0)) this.todos.set(todo.id, todo);
+    for (const item of change.put ?? []) {
+      if (item.rev >= (this.items.get(item.id)?.rev ?? 0)) this.items.set(item.id, item);
     }
     this.outbox.push(...(change.addOps ?? []));
     if (change.dropOps) {
@@ -141,7 +163,7 @@ export class MemoryStore implements LocalStore {
 }
 
 export class SyncEngine {
-  private readonly confirmed = new Map<string, Todo>();
+  private readonly confirmed = new Map<string, EntityItem>();
   private outbox: SyncOp[];
   private cursor: number;
   private readonly rejectionList: Rejection[] = [];
@@ -149,14 +171,15 @@ export class SyncEngine {
   private running: Promise<SyncOutcome> | null = null;
   private runAgain = false;
   private connected = true;
-  private cachedView: Todo[] | null = null;
+  private projected: Map<string, EntityItem> | null = null;
+  private readonly viewCache = new Map<string, readonly EntityItem[]>();
 
   private constructor(
     private readonly options: EngineOptions,
     private readonly deviceId: string,
     snapshot: StoreSnapshot,
   ) {
-    for (const todo of snapshot.todos) this.confirmed.set(todo.id, todo);
+    for (const item of snapshot.items) this.confirmed.set(item.id, item);
     this.outbox = [...snapshot.outbox];
     this.cursor = snapshot.cursor;
   }
@@ -172,10 +195,14 @@ export class SyncEngine {
     return new SyncEngine(options, deviceId, snapshot);
   }
 
-  /** The To-Dos to show, newest first. The same array is returned until something changes. */
-  view(): readonly Todo[] {
-    this.cachedView ??= projectTodos(this.confirmed.values(), this.outbox);
-    return this.cachedView;
+  /** The live items of one kind, newest first. The same array is returned until something changes. */
+  items(entity: string): readonly EntityItem[] {
+    let view = this.viewCache.get(entity);
+    if (!view) {
+      view = visibleItems(this.project().values(), entity, this.options.schemas);
+      this.viewCache.set(entity, view);
+    }
+    return view;
   }
 
   status(): SyncStatus {
@@ -197,23 +224,32 @@ export class SyncEngine {
     this.notify();
   }
 
-  /** Calls `listener` whenever the view, the status or the rejections change. */
+  /** Calls `listener` whenever the items, the status or the rejections change. */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  async createTodo(title: unknown): Promise<CreateResult> {
-    const check = checkTitle(title);
-    if (!check.ok) return check;
+  /** Creates an item of the given kind. Refused, with a reason to show, if its rules say no. */
+  async create(entity: string, fields: Fields): Promise<CreateResult> {
+    const schema = this.options.schemas[entity];
+    if (!schema) throw new Error(`There is no schema named “${entity}”.`);
+    const checked = checkCreate(schema, fields, this.context());
+    if (!checked.ok) return { ok: false, message: checked.message };
+
+    // Send what the user gave, in its stored form; the server fills in the rest itself.
+    const sent: Fields = {};
+    for (const name of Object.keys(fields)) sent[name] = checked.fields[name] ?? null;
+
     const id = this.options.newId();
     await this.apply({
       addOps: [
         {
-          kind: 'create_todo',
+          kind: 'create',
           opId: this.options.newId(),
+          entity,
           itemId: id,
-          title: check.title,
+          fields: sent,
           clientChangedAt: this.now(),
         },
       ],
@@ -221,27 +257,23 @@ export class SyncEngine {
     return { ok: true, id };
   }
 
-  async renameTodo(id: string, title: unknown): Promise<MutationResult> {
-    const check = checkTitle(title);
-    if (!check.ok) return check;
-    if (!this.view().some((todo) => todo.id === id))
-      return { ok: false, message: 'No such To-Do.' };
-    await this.apply({ addOps: [this.updateOp(id, { title: check.title })] });
+  /** Changes fields of an item. Changing nothing is fine and sends nothing. */
+  async update(id: string, changes: Fields): Promise<MutationResult> {
+    const op = this.updateOp(id, changes);
+    if (!op.ok) return op;
+    if (op.op) await this.apply({ addOps: [op.op] });
     return { ok: true };
   }
 
-  /** Hides the To-Dos from every device. Their history is kept. */
-  async abandonTodos(ids: readonly string[]): Promise<number> {
-    const visible = new Set(this.view().map((todo) => todo.id));
-    const targets = ids.filter((id) => visible.has(id));
-    if (targets.length > 0) {
-      await this.apply({ addOps: targets.map((id) => this.updateOp(id, { state: 'abandoned' })) });
+  /** Makes the same change to several items. Returns how many were changed. */
+  async updateMany(ids: readonly string[], changes: Fields): Promise<number> {
+    const ops: SyncOp[] = [];
+    for (const id of ids) {
+      const op = this.updateOp(id, changes);
+      if (op.ok && op.op) ops.push(op.op);
     }
-    return targets.length;
-  }
-
-  abandonAll(): Promise<number> {
-    return this.abandonTodos(this.view().map((todo) => todo.id));
+    if (ops.length > 0) await this.apply({ addOps: ops });
+    return ops.length;
   }
 
   /**
@@ -293,13 +325,13 @@ export class SyncEngine {
         throw new Error('The server answered a different number of changes than were sent.');
       }
 
-      const put: Todo[] = [];
+      const put: EntityItem[] = [];
       for (const [index, op] of batch.entries()) {
         const result = results[index]!;
         if (result.status === 'rejected') {
           this.rejectionList.push({ op, reason: result.reason, message: result.message });
         } else if (result.revision) {
-          put.push(result.revision.todo);
+          put.push(result.revision.item);
         }
       }
       await this.apply({ put, dropOps: batch.map((op) => op.opId) });
@@ -316,7 +348,7 @@ export class SyncEngine {
       }
       const last = page.revisions.at(-1);
       await this.apply({
-        put: page.revisions.map((revision) => revision.todo),
+        put: page.revisions.map((revision) => revision.item),
         ...(last ? { cursor: last.seq } : {}),
       });
       if (!page.hasMore || !last) return;
@@ -331,8 +363,8 @@ export class SyncEngine {
       this.confirmed.clear();
       this.cursor = 0;
     }
-    for (const todo of change.put ?? []) {
-      if (todo.rev >= (this.confirmed.get(todo.id)?.rev ?? 0)) this.confirmed.set(todo.id, todo);
+    for (const item of change.put ?? []) {
+      if (item.rev >= (this.confirmed.get(item.id)?.rev ?? 0)) this.confirmed.set(item.id, item);
     }
     this.outbox.push(...(change.addOps ?? []));
     if (change.dropOps) {
@@ -343,15 +375,41 @@ export class SyncEngine {
     this.notify();
   }
 
-  private updateOp(id: string, changes: { title?: string; state?: 'abandoned' }): SyncOp {
+  private updateOp(
+    id: string,
+    changes: Fields,
+  ): { ok: true; op: SyncOp | null } | { ok: false; message: string } {
+    const current = this.project().get(id);
+    const schema = current ? this.options.schemas[current.entity] : undefined;
+    if (!current || !schema) return { ok: false, message: 'No such item.' };
+
+    const checked = checkUpdate(schema, current, changes, this.context());
+    if (!checked.ok) return { ok: false, message: checked.message };
+    if (checked.changedFields.length === 0) return { ok: true, op: null };
+
+    const sent: Fields = {};
+    for (const name of checked.changedFields) sent[name] = checked.next[name] ?? null;
     return {
-      kind: 'update_todo',
-      opId: this.options.newId(),
-      itemId: id,
-      baseRev: this.confirmed.get(id)?.rev ?? 0,
-      changes,
-      clientChangedAt: this.now(),
+      ok: true,
+      op: {
+        kind: 'update',
+        opId: this.options.newId(),
+        itemId: id,
+        baseRev: this.confirmed.get(id)?.rev ?? 0,
+        changes: sent,
+        clientChangedAt: this.now(),
+      },
     };
+  }
+
+  private project(): Map<string, EntityItem> {
+    this.projected ??= projectItems(this.confirmed.values(), this.outbox, this.options.schemas);
+    return this.projected;
+  }
+
+  private context() {
+    const items = this.project();
+    return { get: (id: string) => items.get(id) };
   }
 
   private now(): string {
@@ -359,7 +417,8 @@ export class SyncEngine {
   }
 
   private notify(): void {
-    this.cachedView = null;
+    this.projected = null;
+    this.viewCache.clear();
     for (const listener of this.listeners) listener();
   }
 }
