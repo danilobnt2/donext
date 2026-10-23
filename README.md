@@ -55,7 +55,7 @@ Screens are designed for mobile (390 px), tablet and desktop: Next up, To-Dos bo
 
 ## Status
 
-Bootstrap. The deployed slice lets anyone create a To-Do and see the list, on one board shared by everyone until sign-in exists. Limits: 500 characters per title, 10,000 To-Dos per board. Anyone can delete every To-Do with one button, so unwanted content can be cleared at once; this goes away with sign-in.
+Bootstrap. The deployed slice lets anyone create To-Dos on one board shared by everyone until sign-in exists. Each device keeps its own copy of the board in IndexedDB and syncs it with the server, so the app works offline and sends its changes when the connection returns. Changes merge field by field and the later write wins a field. Limits: 500 characters per title, 10,000 To-Dos per board. Anyone can hide every To-Do with one button ("Delete all" abandons them: they leave the board and stay in the history), so unwanted content can be cleared at once; this goes away with sign-in.
 
 <p>
   <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/desktop.png" alt="Do Next on desktop: a New To-Do form above a list of five To-Dos, each marked New, with a Delete all button" width="560">
