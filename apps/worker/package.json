@@ -10,12 +10,12 @@
     "types": "wrangler types --strict-vars false"
   },
   "dependencies": {
-    "@donext/shared": "workspace:*",
-    "ulid": "3.0.2"
+    "@donext/shared": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.0",
     "@donext/web": "workspace:*",
+    "ulid": "3.0.2",
     "vitest": "5.0.3",
     "wrangler": "4.149.0"
   }
