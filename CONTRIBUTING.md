@@ -29,6 +29,15 @@ pnpm screenshots   # retakes the README screenshots into e2e/screenshots/
 
 After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and commit `worker-configuration.d.ts`.
 
+## Adding a kind of synced data
+
+Sync does not know what the data is. A kind (a To-Do, later a Task) is a schema plus where it is kept on each side, and tests fail until all of them agree:
+
+1. **Schema** in `packages/shared`: its fields, what a device may set, and its rules (`todoSchema` in `todo.ts` is the model). Register it in `schemas.ts`.
+2. **Server storage** in `apps/worker`: a migration for its table or columns in `schema.ts`, and a `TableMapping` in `mappings.ts` (field to column). Tables are shaped for the data; the revision log is the only table that exists for sync.
+3. **Device storage** in `apps/web/src/sync`: a mapping in `stores.ts` and a new entry at the end of `migrations.ts` that creates its object store **and calls `resetCursor`**, so devices that skipped the kind with an older app pull it from the start.
+4. Keep both migrations backward compatible with the previous release, and never edit one that has shipped.
+
 ## Branching
 
 Trunk-based: `master` is the only long-lived branch and is always releasable. There is no `develop` branch.
