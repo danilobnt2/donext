@@ -82,11 +82,13 @@ export interface Change {
 
 /**
  * Changes after the cursor, oldest first. `resync` means the server can no longer say what
- * changed since the cursor (it has forgotten old deletions, or it was reset): the device must
- * drop its copy and pull again from zero.
+ * changed since the cursor, because it has forgotten old deletions: the device must drop its
+ * copy and pull again from zero. It must do the same when `epoch` is not the one it last saw,
+ * which means the server's data started again from nothing.
  */
 export type PullResponse =
-  { resync: false; changes: Change[]; latestSeq: number; hasMore: boolean } | { resync: true };
+  | { resync: false; epoch: number; changes: Change[]; latestSeq: number; hasMore: boolean }
+  | { resync: true };
 
 export type ParsedOp = { ok: true; op: SyncOp } | { ok: false; opId: string };
 

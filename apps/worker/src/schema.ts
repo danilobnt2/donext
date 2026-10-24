@@ -13,6 +13,25 @@ const MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+
+  // Sync's versioning, added to the domain table: the user-wide sequence number of the last
+  // write to each row. Rows written before sync existed are numbered in the order they were made.
+  'ALTER TABLE work_items ADD COLUMN seq INTEGER NOT NULL DEFAULT 0',
+  `UPDATE work_items
+   SET seq = (SELECT COUNT(*) FROM work_items AS earlier WHERE earlier.id <= work_items.id)`,
+  'CREATE INDEX work_items_by_seq ON work_items (seq)',
+
+  // Sync's own state: the sequence counter, the store's epoch, and the newest deletion that has
+  // been forgotten (see sync-state.ts).
+  'CREATE TABLE sync_state (key TEXT PRIMARY KEY, value INTEGER NOT NULL)',
+  `INSERT INTO sync_state (key, value) VALUES
+     ('seq', (SELECT COUNT(*) FROM work_items)),
+     ('epoch', CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)),
+     ('watermark', 0)`,
+  // Deleted items, kept only so that devices remove them too, and only up to a cap.
+  'CREATE TABLE sync_deletions (seq INTEGER PRIMARY KEY, entity TEXT NOT NULL, id TEXT NOT NULL)',
+  // Recent operation ids, so a retried operation is not applied twice. Also capped.
+  'CREATE TABLE sync_applied_ops (op_id TEXT PRIMARY KEY)',
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
