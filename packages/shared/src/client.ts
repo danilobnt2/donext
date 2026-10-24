@@ -347,8 +347,13 @@ export class SyncEngine {
         continue;
       }
       const last = page.revisions.at(-1);
+      // An app that is older than the server may meet kinds of data it has no schema for. It
+      // moves past them: a newer app, whose first sync starts from zero, will pick them up.
+      const known = page.revisions.filter((revision) =>
+        Object.hasOwn(this.options.schemas, revision.entity),
+      );
       await this.apply({
-        put: page.revisions.map((revision) => revision.item),
+        put: known.map((revision) => revision.item),
         ...(last ? { cursor: last.seq } : {}),
       });
       if (!page.hasMore || !last) return;

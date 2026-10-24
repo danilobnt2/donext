@@ -119,6 +119,8 @@ function fakeServer(schemas: Schemas = ALL) {
     state,
     items,
     revisions,
+    /** Puts an item on the server as another device or a newer app would have. */
+    add: (item: EntityItem) => record(item, Object.keys(item.fields)),
     reset() {
       seq = 0;
       items.clear();
@@ -330,6 +332,31 @@ describe('SyncEngine with To-Dos', () => {
 
     await engine.sync();
     expect(titles(engine)).toEqual(['After the reset']);
+  });
+
+  it('skips kinds of data it has no schema for, and still moves its cursor past them', async () => {
+    const { engine, server, store } = await openEngine();
+    await createTodo(engine, 'Known');
+    await engine.sync();
+
+    const future: EntityItem = {
+      id: newId(),
+      entity: 'gadget',
+      rev: 1,
+      createdAt: NOW,
+      updatedAt: NOW,
+      fields: { colour: 'red' },
+    };
+    server.add(future);
+    const other = (await openEngine(server)).engine;
+    await createTodo(other, 'Added after the unknown kind');
+    await other.sync();
+
+    expect((await engine.sync()).ok).toBe(true);
+    expect(titles(engine)).toEqual(['Added after the unknown kind', 'Known']);
+    const stored = await store.load();
+    expect(stored.items.map((item) => item.entity)).toEqual(['todo', 'todo']);
+    expect(stored.cursor).toBe(server.revisions.at(-1)!.seq);
   });
 
   it('abandons every visible To-Do', async () => {
