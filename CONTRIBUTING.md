@@ -29,6 +29,20 @@ pnpm screenshots   # retakes the README screenshots into e2e/screenshots/
 
 After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and commit `worker-configuration.d.ts`.
 
+## Synced data
+
+Each device keeps a mirror of the user's data and syncs it with the user's Durable Object. The data is stored in tables (and, on the device, IndexedDB object stores) shaped for it; sync is added on top and does not shape them. There are two separate kinds of versioning, each bounded on its own:
+
+- **Domain**: each item has a `rev`, bumped on every accepted change. Items are bounded by each kind's limit (10,000 To-Dos), and deleting an item removes it for good.
+- **Sync**: a user-wide sequence number, stamped on every row as `seq`, tells devices what changed since their cursor. Its bookkeeping is capped in `apps/worker/src/sync-state.ts`: remembered deletions (beyond the cap the oldest are forgotten, and a device that may have missed them is told to start its mirror over) and recent operation ids (so a retried change is applied once).
+
+The rules for each kind live in one schema in `packages/shared`, used by both the server and the device. To add a kind of synced data:
+
+1. **Schema** in `packages/shared`: its fields, which ones a person may set, and its rules (`todoSchema` in `todo.ts` is the model). Register it in `schemas.ts`.
+2. **Server storage** in `apps/worker`: a migration for its table or columns, including a `seq INTEGER NOT NULL DEFAULT 0` column and an index on it, in `schema.ts`, and a `TableMapping` in `mappings.ts`.
+3. **Device storage** in `apps/web/src/sync`: a mapping in `stores.ts`, and a new entry at the end of `migrations.ts` that creates its object store **and calls `restartSync`**, so devices that skipped the kind with an older app take it on.
+4. Keep migrations on both sides backward compatible with the previous release, and never edit one that has shipped. Tests fail until the schema and both mappings agree.
+
 ## Branching
 
 Trunk-based: `master` is the only long-lived branch and is always releasable. There is no `develop` branch.
