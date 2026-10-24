@@ -5,7 +5,6 @@ import {
   checkUpdate,
   type CreateOp,
   type EntityItem,
-  type EntitySchema,
   type OpResult,
   type ParsedOp,
   type PullResponse,
@@ -13,16 +12,9 @@ import {
   type Revision,
   type UpdateOp,
 } from '@donext/shared';
+import { MAPPINGS } from './mappings';
+import { tableRepository, type EntityRepository } from './repository';
 import { migrate } from './schema';
-
-type ItemRow = {
-  id: string;
-  entity: string;
-  rev: number;
-  created_at: string;
-  updated_at: string;
-  fields: string;
-};
 
 type RevisionRow = {
   seq: number;
@@ -34,18 +26,23 @@ type RevisionRow = {
   snapshot: string;
 };
 
-const ITEM_COLUMNS = 'id, entity, rev, created_at, updated_at, fields';
 const REVISION_COLUMNS = 'seq, item_id, entity, rev, changed_at, changed_fields, snapshot';
 
 /**
- * One user's data: entity items and the log of every change to them. Until sign-in exists, a
- * single shared instance holds everything. It knows nothing about what the items are; the
- * schemas say what they may contain and which changes are allowed.
+ * One user's data. Items are kept by their kind's repository, in tables shaped for that kind;
+ * what this class adds is the log of every change, which is what devices sync from. The schemas
+ * say what each kind may contain and which changes are allowed. Until sign-in exists, a single
+ * shared instance holds everything.
  */
 export class UserStore extends DurableObject<Env> {
+  private readonly repositories = new Map<string, EntityRepository>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
+    for (const mapping of Object.values(MAPPINGS)) {
+      this.repositories.set(mapping.entity, tableRepository(ctx.storage.sql, mapping));
+    }
   }
 
   /**
@@ -87,25 +84,18 @@ export class UserStore extends DurableObject<Env> {
   private applyCreate(source: string, op: CreateOp): OpResult {
     const schema = Object.hasOwn(SCHEMAS, op.entity) ? SCHEMAS[op.entity] : undefined;
     if (!schema) return rejected(op.opId, 'unknown_entity', `There is no “${op.entity}”.`);
-    if (this.item(op.itemId)) {
+    const repository = this.repository(op.entity);
+    if (this.findItem(op.itemId)) {
       return rejected(op.opId, 'item_exists', 'An item with this id already exists.');
     }
 
     const checked = checkCreate(schema, op.fields, this.context());
     if (!checked.ok) return rejected(op.opId, checked.reason, checked.message);
-    if (schema.limit && this.liveCount(schema) >= schema.limit.max) {
+    if (schema.limit && repository.count(schema.terminal) >= schema.limit.max) {
       return rejected(op.opId, 'limit_reached', schema.limit.message);
     }
 
     const now = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      `INSERT INTO entities (${ITEM_COLUMNS}) VALUES (?, ?, 1, ?, ?, ?)`,
-      op.itemId,
-      op.entity,
-      now,
-      now,
-      JSON.stringify(checked.fields),
-    );
     const item: EntityItem = {
       id: op.itemId,
       entity: op.entity,
@@ -114,6 +104,7 @@ export class UserStore extends DurableObject<Env> {
       updatedAt: now,
       fields: checked.fields,
     };
+    repository.insert(item);
     const revision = this.recordRevision(source, op, 0, now, Object.keys(checked.fields), item);
     return { opId: op.opId, status: 'applied', revision };
   }
@@ -125,7 +116,7 @@ export class UserStore extends DurableObject<Env> {
    * that revision's snapshot.
    */
   private applyUpdate(source: string, op: UpdateOp): OpResult {
-    const current = this.item(op.itemId);
+    const current = this.findItem(op.itemId);
     if (!current) return rejected(op.opId, 'unknown_item', 'No such item.');
     const schema = Object.hasOwn(SCHEMAS, current.entity) ? SCHEMAS[current.entity] : undefined;
     if (!schema) return rejected(op.opId, 'unknown_entity', `There is no “${current.entity}”.`);
@@ -142,13 +133,7 @@ export class UserStore extends DurableObject<Env> {
       updatedAt: now,
       fields: checked.next,
     };
-    this.ctx.storage.sql.exec(
-      'UPDATE entities SET fields = ?, rev = ?, updated_at = ? WHERE id = ?',
-      JSON.stringify(item.fields),
-      item.rev,
-      now,
-      item.id,
-    );
+    this.repository(item.entity).update(item);
     const revision = this.recordRevision(source, op, op.baseRev, now, checked.changedFields, item);
     return { opId: op.opId, status: 'applied', revision };
   }
@@ -196,52 +181,28 @@ export class UserStore extends DurableObject<Env> {
     return row ? toRevision(row) : null;
   }
 
-  private item(id: string): EntityItem | undefined {
-    const row = this.ctx.storage.sql
-      .exec<ItemRow>(`SELECT ${ITEM_COLUMNS} FROM entities WHERE id = ?`, id)
-      .toArray()[0];
-    return row ? toItem(row) : undefined;
+  private repository(entity: string): EntityRepository {
+    const repository = this.repositories.get(entity);
+    if (!repository) throw new Error(`The “${entity}” schema has no table mapping.`);
+    return repository;
   }
 
-  /** How many items of this kind count against its limit: those not yet finished. */
-  private liveCount(schema: EntitySchema): number {
-    const { terminal } = schema;
-    const { count } = terminal
-      ? this.ctx.storage.sql
-          .exec<{ count: number }>(
-            'SELECT COUNT(*) AS count FROM entities WHERE entity = ? AND json_extract(fields, ?) IS NOT ?',
-            schema.name,
-            `$.${terminal.field}`,
-            terminal.value,
-          )
-          .one()
-      : this.ctx.storage.sql
-          .exec<{ count: number }>(
-            'SELECT COUNT(*) AS count FROM entities WHERE entity = ?',
-            schema.name,
-          )
-          .one();
-    return count;
+  /** Looks an item up without knowing its kind: ids are unique across kinds. */
+  private findItem(id: string): EntityItem | undefined {
+    for (const repository of this.repositories.values()) {
+      const item = repository.get(id);
+      if (item) return item;
+    }
+    return undefined;
   }
 
   private context() {
-    return { get: (id: string) => this.item(id) };
+    return { get: (id: string) => this.findItem(id) };
   }
 }
 
 function rejected(opId: string, reason: RejectReason, message: string): OpResult {
   return { opId, status: 'rejected', reason, message };
-}
-
-function toItem(row: ItemRow): EntityItem {
-  return {
-    id: row.id,
-    entity: row.entity,
-    rev: row.rev,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    fields: JSON.parse(row.fields) as EntityItem['fields'],
-  };
 }
 
 function toRevision(row: RevisionRow): Revision {

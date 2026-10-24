@@ -21,7 +21,7 @@ const board = () => env.USER_STORE.getByName('shared-board');
 // Durable Object storage persists across tests in this file, so start each one empty.
 beforeEach(async () => {
   await runInDurableObject(board(), (_instance, state) => {
-    state.storage.sql.exec('DELETE FROM entities');
+    state.storage.sql.exec('DELETE FROM work_items');
     state.storage.sql.exec('DELETE FROM entity_revisions');
     state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'entity_revisions'");
   });
@@ -137,8 +137,8 @@ describe('creating', () => {
     await runInDurableObject(board(), (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO entities (id, entity, rev, created_at, updated_at, fields)
-         SELECT printf('seed%022d', i), 'todo', 1, '', '', '{"title":"seed","state":"new"}' FROM n`,
+         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
+         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
         TODO_LIMIT,
       );
     });
@@ -148,9 +148,7 @@ describe('creating', () => {
     });
 
     await runInDurableObject(board(), (_instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE entities SET fields = '{"title":"seed","state":"abandoned"}' WHERE id LIKE 'seed%1'`,
-      );
+      state.storage.sql.exec("UPDATE work_items SET state = 'abandoned' WHERE id LIKE 'seed%1'");
     });
     expect(await pushOne(create('Room again'))).toMatchObject({ status: 'applied' });
   });

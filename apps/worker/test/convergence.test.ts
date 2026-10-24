@@ -22,7 +22,7 @@ import { ulid } from 'ulid';
 
 beforeEach(async () => {
   await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
-    state.storage.sql.exec('DELETE FROM entities');
+    state.storage.sql.exec('DELETE FROM work_items');
     state.storage.sql.exec('DELETE FROM entity_revisions');
     state.storage.sql.exec("DELETE FROM sqlite_sequence WHERE name = 'entity_revisions'");
   });
