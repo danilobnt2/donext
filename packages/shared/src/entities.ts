@@ -3,8 +3,18 @@
  * they arrive; the types below follow from it.
  */
 
-import { defineEntities } from './change';
+import type { EntityType } from './change';
 import * as Todos from './todo';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any EntityType, whatever its types
+type AnyEntityType = EntityType<any, any, any, any>;
+
+/** Lists the kinds of entity a user's data holds, keyed by kind. */
+function defineEntities<const X extends readonly AnyEntityType[]>(
+  ...types: X
+): { [T in X[number] as T['kind']]: T } {
+  return Object.fromEntries(types.map((type) => [type.kind, type])) as never;
+}
 
 export const entities = defineEntities(Todos.entityType);
 

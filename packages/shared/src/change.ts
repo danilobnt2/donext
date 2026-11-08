@@ -45,9 +45,6 @@ export abstract class EntityType<E extends EntityBase, C, Code extends string, C
   declare readonly types: { entity: E; change: C; code: Code };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any EntityType, whatever its types
-type AnyEntityType = EntityType<any, any, any, any>;
-
 /** Applies a change and commits the entities it produces. */
 export async function write<E extends EntityBase, C, Code extends string, Context>(
   type: EntityType<E, C, Code, Context>,
@@ -58,13 +55,6 @@ export async function write<E extends EntityBase, C, Code extends string, Contex
   const result = type.apply(await type.load(store, change), change, now);
   if (result.ok && result.value.length > 0) await store.commit(result.value);
   return result;
-}
-
-/** Lists the kinds of entity a user's data holds, keyed by kind. */
-export function defineEntities<const X extends readonly AnyEntityType[]>(
-  ...types: X
-): { [T in X[number] as T['kind']]: T } {
-  return Object.fromEntries(types.map((type) => [type.kind, type])) as never;
 }
 
 export function isObject(input: unknown): input is Record<string, unknown> {
