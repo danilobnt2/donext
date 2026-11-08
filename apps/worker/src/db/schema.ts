@@ -21,7 +21,8 @@ export const workItems = sqliteTable(
   'work_items',
   {
     id: text('id').primaryKey(),
-    type: text('type', { enum: ['todo', 'task'] }).notNull(),
+    // Only To-Dos are stored so far; the CHECK below still allows Tasks.
+    type: text('type', { enum: ['todo'] }).notNull(),
     title: text('title').notNull(),
     state: text('state', { enum: Todos.STATES }).notNull(),
     rev: integer('rev').notNull(),

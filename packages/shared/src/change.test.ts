@@ -50,6 +50,7 @@ describe('write', () => {
         ok: true,
         value: [A, B].map((id) => ({
           kind: 'todo',
+          type: 'todo',
           id,
           title: 'Both',
           state: 'new',

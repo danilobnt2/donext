@@ -23,6 +23,5 @@ export const rules: { [K in Type]: Kind<Entity, ChangeOf<K>, CodeOf<K>, unknown>
 
 /** Where each type of entity is stored. Fails to compile if a table and its entity differ. */
 export const mappings = mappingsFor<Entity>()({
-  // To-Dos are the rows of work_items whose type is 'todo'.
-  todo: { table: workItems, scope: { key: 'type', value: 'todo' } },
+  todo: { table: workItems },
 });

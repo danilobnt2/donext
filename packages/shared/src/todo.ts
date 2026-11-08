@@ -31,6 +31,8 @@ export type State = (typeof STATES)[number];
 /** A To-Do as it is stored. Times are Unix milliseconds. */
 export interface Entity extends EntityBase {
   kind: 'todo';
+  /** To-Dos are stored as work items of this type. Goes away when they get their own table. */
+  type: 'todo';
   title: string;
   state: State;
   /** Counts the writes to this To-Do, starting at 1. */
@@ -85,6 +87,7 @@ export function apply(
     value: [
       {
         kind: 'todo',
+        type: 'todo',
         id: change.id,
         title: change.title,
         state: 'new',

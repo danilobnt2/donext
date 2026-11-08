@@ -4,6 +4,7 @@ import * as Todos from './todo';
 const ID = '01JC0000000000000000000000';
 const todo: Todos.Entity = {
   kind: 'todo',
+  type: 'todo',
   id: ID,
   title: 'Cut the lawn',
   state: 'new',
