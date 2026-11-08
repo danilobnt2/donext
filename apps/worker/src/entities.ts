@@ -1,5 +1,5 @@
 import { Todos, type Kind } from '@donext/shared';
-import type { Mappings } from './db-store';
+import { mappingsFor } from './db-store';
 import { todos } from './db/todos';
 
 /**
@@ -22,4 +22,4 @@ export const rules: { [K in Type]: Kind<Entity, ChangeOf<K>, CodeOf<K>, unknown>
 };
 
 /** Where each type of entity is stored. */
-export const mappings: Mappings<Entity> = { todo: todos };
+export const mappings = mappingsFor<Entity>()({ todo: todos });

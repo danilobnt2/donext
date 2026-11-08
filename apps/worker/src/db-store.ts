@@ -17,13 +17,34 @@ export interface Mapping<T extends EntityTable = EntityTable> {
 }
 
 /** The entity a Mapping stores: its row, minus any scope column, plus `kind`. */
-export type EntityOf<M extends Mapping, K extends string> = Omit<
+type StoredEntity<M extends Mapping, K extends string> = Omit<
   M['table']['$inferSelect'],
   NonNullable<M['scope']>['key'] | 'kind'
 > & { kind: K };
 
 /** One Mapping per type of entity the store holds. */
 export type Mappings<E extends EntityBase> = { [K in E['kind']]: Mapping };
+
+type Flat<T> = { [K in keyof T]: T[K] };
+type Same<A, B> =
+  (<T>() => T extends Flat<A> ? 1 : 2) extends <T>() => T extends Flat<B> ? 1 : 2 ? true : false;
+
+/** Each Mapping as given, or an error message where its table and its entity differ. */
+type Checked<E extends EntityBase, M extends Mappings<E>> = {
+  [K in keyof M]: K extends E['kind']
+    ? Same<StoredEntity<M[K], K>, Extract<E, { kind: K }>> extends true
+      ? M[K]
+      : `The ${K} table does not match its entity`
+    : M[K];
+};
+
+/**
+ * Declares the Mappings for the entities E. Fails to compile if any table and its entity
+ * drift apart, so rows need no mapping code.
+ */
+export function mappingsFor<E extends EntityBase>() {
+  return <const M extends Mappings<E>>(mappings: M & Checked<E, M>): M => mappings;
+}
 
 type Row = Record<string, unknown>;
 
