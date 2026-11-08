@@ -1,51 +1,34 @@
 import { DurableObject } from 'cloudflare:workers';
-import { TODO_LIMIT, type Todo, type TodoState } from '@donext/shared';
-import { count, desc, eq } from 'drizzle-orm';
-import { ulid } from 'ulid';
-import { openDb, type Db } from './db';
-import { workItems } from './db/schema';
+import { Todos, write, type Checked, type Todo } from '@donext/shared';
+import { openDb } from './db';
+import { DbStore } from './db-store';
 
-export type CreateTodoResult = { ok: true; todo: Todo } | { ok: false; reason: 'limit_reached' };
-
-const isTodo = eq(workItems.type, 'todo');
-
-/** One user's data. Until sign-in exists, a single shared instance holds every To-Do. */
+/**
+ * One user's data. Until sign-in exists, a single shared instance holds every To-Do.
+ * The rules live in @donext/shared; this object only routes requests to them and to its
+ * storage.
+ */
 export class UserStore extends DurableObject<Env> {
-  private db!: Db;
+  private store!: DbStore;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.db = await openDb(ctx.storage);
+      this.store = new DbStore(await openDb(ctx.storage));
     });
   }
 
   listTodos(): Todo[] {
-    return this.db
-      .select({
-        id: workItems.id,
-        title: workItems.title,
-        state: workItems.state,
-        createdAt: workItems.createdAt,
-      })
-      .from(workItems)
-      .where(isTodo)
-      .orderBy(desc(workItems.id))
-      .all()
-      .map((row) => ({ ...row, state: row.state as TodoState }));
+    return this.store.todos().map(toTodo);
   }
 
-  createTodo(title: string): CreateTodoResult {
-    const todos = this.db.select({ count: count() }).from(workItems).where(isTodo).get();
-    if ((todos?.count ?? 0) >= TODO_LIMIT) return { ok: false, reason: 'limit_reached' };
-
-    const now = new Date().toISOString();
-    const todo: Todo = { id: ulid(), title, state: 'new', createdAt: now };
-    this.db
-      .insert(workItems)
-      .values({ ...todo, type: 'todo', rev: 1, updatedAt: now })
-      .run();
-    return { ok: true, todo };
+  /** Applies a change to a To-Do and returns the To-Do as it now stands. */
+  async writeTodo(change: Todos.Change): Promise<Checked<Todo, Todos.ViolationCode>> {
+    const result = await write(Todos.kind, this.store, change, Date.now());
+    if (!result.ok) return result;
+    const todo = result.value.find((item) => item.id === change.id);
+    if (!todo) throw new Error(`Writing To-Do ${change.id} did not produce it.`);
+    return { ok: true, value: toTodo(todo) };
   }
 
   /**
@@ -53,6 +36,15 @@ export class UserStore extends DurableObject<Env> {
    * sign-in gives each user their own; remove it then.
    */
   deleteAllTodos(): number {
-    return this.db.delete(workItems).where(isTodo).returning({ id: workItems.id }).all().length;
+    return this.store.deleteAllTodos();
   }
+}
+
+function toTodo(item: Todos.Item): Todo {
+  return {
+    id: item.id,
+    title: item.title,
+    state: item.state,
+    createdAt: new Date(item.createdAt).toISOString(),
+  };
 }

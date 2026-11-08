@@ -1,0 +1,67 @@
+import { describe, expect, it } from 'vitest';
+import { write, type Kind, type Store } from './change';
+import * as Todos from './todo';
+
+/** The simplest Store: items in memory. */
+class MemoryStore implements Store<Todos.Item> {
+  items = new Map<string, Todos.Item>();
+  commits: Todos.Item[][] = [];
+
+  async get<K extends 'todo'>(_kind: K, id: string) {
+    return (this.items.get(id) ?? null) as Extract<Todos.Item, { kind: K }> | null;
+  }
+
+  async count() {
+    return this.items.size;
+  }
+
+  async commit(items: Todos.Item[]) {
+    this.commits.push(items);
+    for (const item of items) this.items.set(item.id, item);
+  }
+}
+
+const A = '01JC000000000000000000000A';
+const B = '01JC000000000000000000000B';
+
+describe('write', () => {
+  it('commits the items a change produces', async () => {
+    const store = new MemoryStore();
+    const create = Todos.parseCreate({ title: 'Cut the lawn' }, A);
+    if (!create.ok) throw new Error(create.message);
+    expect(await write(Todos.kind, store, create.value, 100)).toMatchObject({ ok: true });
+    expect(await store.get('todo', A)).toMatchObject({ title: 'Cut the lawn', rev: 1 });
+  });
+
+  it('commits nothing for a rejected change', async () => {
+    const store = new MemoryStore();
+    const create = { op: 'create', id: A, title: 'Cut the lawn' } as const;
+    await write(Todos.kind, store, create, 100);
+    expect(await write(Todos.kind, store, create, 200)).toMatchObject({ code: 'already_exists' });
+    expect(store.commits).toHaveLength(1);
+  });
+
+  it('commits every item a change touches together', async () => {
+    const store = new MemoryStore();
+    // A change that touches two items, as completing a Task will touch its To-Do.
+    const both: Kind<Todos.Item, null, never, null> = {
+      load: async () => null,
+      apply: (_context, _change, now) => ({
+        ok: true,
+        value: [A, B].map((id) => ({
+          kind: 'todo',
+          id,
+          title: 'Both',
+          state: 'new',
+          rev: 1,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      }),
+    };
+    await write(both, store, null, 100);
+    expect(store.commits).toEqual([
+      [expect.objectContaining({ id: A }), expect.objectContaining({ id: B })],
+    ]);
+  });
+});

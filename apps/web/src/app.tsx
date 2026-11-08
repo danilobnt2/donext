@@ -1,8 +1,8 @@
-import { checkTitle, type Todo, type TodoState } from '@donext/shared';
+import { Todos, type Todo } from '@donext/shared';
 import { useEffect, useState } from 'preact/hooks';
 import { createTodo, deleteAllTodos, listTodos } from './api';
 
-const STATE_LABELS: Record<TodoState, string> = {
+const STATE_LABELS: Record<Todos.State, string> = {
   new: 'New',
   active: 'Active',
   pending: 'Pending',
@@ -24,7 +24,7 @@ export function App() {
 
   async function onSubmit(event: Event) {
     event.preventDefault();
-    const check = checkTitle(title);
+    const check = Todos.checkTitle(title);
     if (!check.ok) return setFormError(check.message);
     setSaving(true);
     setFormError(null);

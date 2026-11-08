@@ -1,4 +1,5 @@
-import { checkTitle, type ApiError, type ApiErrorCode } from '@donext/shared';
+import { Todos, type ApiError, type ApiErrorCode } from '@donext/shared';
+import { ulid } from 'ulid';
 import type { UserStore } from './user-store';
 
 export { UserStore } from './user-store';
@@ -6,6 +7,12 @@ export { UserStore } from './user-store';
 /** Every request uses this one store until sign-in gives each user their own. */
 const SHARED_BOARD = 'shared-board';
 const MAX_BODY_BYTES = 4096;
+
+/** HTTP status for each rule a change can break; any other code is a 400. */
+const STATUS: Partial<Record<ApiErrorCode, number>> = {
+  already_exists: 409,
+  todo_limit_reached: 409,
+};
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -44,14 +51,17 @@ async function createTodo(
     return apiError(400, 'invalid_json', 'Body must be JSON.');
   }
 
-  const title = checkTitle(
-    body !== null && typeof body === 'object' && 'title' in body ? body.title : undefined,
-  );
-  if (!title.ok) return apiError(400, 'invalid_title', title.message);
+  // Devices will send their own ids once they create To-Dos offline.
+  const change = Todos.parseCreate(body, ulid());
+  if (!change.ok) return ruleError(change);
 
-  const result = await store.createTodo(title.title);
-  if (!result.ok) return apiError(409, 'todo_limit_reached', 'This board is full.');
-  return Response.json({ todo: result.todo }, { status: 201 });
+  const result = await store.writeTodo(change.value);
+  if (!result.ok) return ruleError(result);
+  return Response.json({ todo: result.value }, { status: 201 });
+}
+
+function ruleError(broken: { code: ApiErrorCode; message: string }): Response {
+  return apiError(STATUS[broken.code] ?? 400, broken.code, broken.message);
 }
 
 function tooLarge(): Response {
