@@ -1,24 +1,16 @@
 /**
  * Schema of the per-user SQLite database. Each entry runs once, in order, inside the
- * Durable Object the first time it starts after a deploy. Append only: never edit an
- * entry that has shipped.
+ * Durable Object the first time it starts after a deploy.
+ *
+ * The history was reset before the MVP had real users, discarding the bootstrap schema
+ * and its demo data. From the first real user on it is append only: never edit an entry
+ * that has shipped.
  */
 const MIGRATIONS: readonly string[] = [
-  `CREATE TABLE work_items (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK (type IN ('todo', 'task')),
-    title TEXT NOT NULL,
-    state TEXT NOT NULL,
-    rev INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`,
   // One row per version of a To-Do; its newest version is its current state. Length
   // limits live in @donext/shared, so they can change without rebuilding the table. Rows
-  // are never updated, only appended and, past Todos.VERSION_LIMIT per To-Do, dropped oldest
-  // first. Times are Unix milliseconds. Existing To-Dos become their first version, made
-  // by an unidentified app device. Dropping work_items breaks rollback to the previous
-  // release, which is accepted.
+  // are never updated, only appended and, past Todos.VERSION_LIMIT per To-Do, dropped
+  // oldest first. Times are Unix milliseconds.
   `CREATE TABLE todo_versions (
     todo_id TEXT NOT NULL,
     version INTEGER NOT NULL CHECK (version >= 1),
@@ -37,32 +29,18 @@ const MIGRATIONS: readonly string[] = [
     ),
     CHECK (actor_kind <> 'system' OR device_changed_at IS NULL),
     PRIMARY KEY (todo_id, version)
-  ) STRICT;
-  INSERT INTO todo_versions (
-    todo_id, version, title, notes, due_date, state, created_at, change, changed_fields,
-    changed_at, device_changed_at, actor_kind, actor_id
-  )
-  SELECT id, 1, title, '', NULL, state, ms, 'create', '["title","notes","dueDate","state"]', ms, NULL, 'device', NULL
-  FROM (
-    SELECT *, CAST(round((julianday(created_at) - 2440587.5) * 86400000) AS INTEGER) AS ms
-    FROM work_items WHERE type = 'todo'
-  );
-  DROP TABLE work_items;`,
+  ) STRICT`,
 ];
 
 export function migrate(storage: DurableObjectStorage): void {
-  migrateTo(storage, MIGRATIONS.length);
-}
-
-/** Applies migrations up to `version`. Exported so tests can start from an older schema. */
-export function migrateTo(storage: DurableObjectStorage, version: number): void {
+  discardBootstrapSchema(storage);
   storage.sql.exec(
     'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)',
   );
   const applied = storage.sql
     .exec<{ version: number }>('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations')
     .one().version;
-  MIGRATIONS.slice(applied, version).forEach((sql, index) => {
+  MIGRATIONS.slice(applied).forEach((sql, index) => {
     storage.transactionSync(() => {
       storage.sql.exec(sql);
       storage.sql.exec(
@@ -71,5 +49,20 @@ export function migrateTo(storage: DurableObjectStorage, version: number): void 
         new Date().toISOString(),
       );
     });
+  });
+}
+
+/**
+ * Drops the bootstrap schema an object may still hold, so the reset history starts from
+ * nothing. Remove once every object has started on the reset schema.
+ */
+function discardBootstrapSchema(storage: DurableObjectStorage): void {
+  const bootstrap = storage.sql
+    .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_items'")
+    .toArray().length;
+  if (!bootstrap) return;
+  storage.transactionSync(() => {
+    storage.sql.exec('DROP TABLE work_items');
+    storage.sql.exec('DROP TABLE schema_migrations');
   });
 }

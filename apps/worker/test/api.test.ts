@@ -1,6 +1,6 @@
 import { Todos, type Todo, type TodoVersion } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
-import { migrate, migrateTo } from '../src/schema';
+import { migrate } from '../src/schema';
 import { CURRENT_VERSIONS } from '../src/user-store';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -275,45 +275,36 @@ describe('unknown API routes', () => {
   });
 });
 
-describe('schema migration', () => {
-  it('moves each work_items To-Do into todo_versions as its first version', async () => {
-    const stub = env.USER_STORE.getByName('migration-test');
+describe('schema reset', () => {
+  it('discards the bootstrap schema and its data, then creates the current one', async () => {
+    const stub = env.USER_STORE.getByName('reset-test');
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql;
-      // Rewind this object to the previous release's schema and data.
+      // Rewind this object to the bootstrap release's schema and data.
       sql.exec('DROP TABLE todo_versions');
       sql.exec('DELETE FROM schema_migrations');
-      migrateTo(state.storage, 1);
       sql.exec(
-        `INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at) VALUES
-         ('01JBZZZZZZZZZZZZZZZZZZZZZ1', 'todo', 'Renew passport', 'new', 1,
-          '2026-10-30T08:15:42.123Z', '2026-10-30T08:15:42.123Z')`,
+        `CREATE TABLE work_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
+           state TEXT NOT NULL, rev INTEGER NOT NULL, created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL)`,
       );
+      sql.exec(
+        "INSERT INTO work_items VALUES ('01JBZZZZZZZZZZZZZZZZZZZZZ1', 'todo', 'Old', 'new', 1, '', '')",
+      );
+      sql.exec("INSERT INTO schema_migrations VALUES (1, '2026-10-10T00:00:00.000Z')");
 
+      migrate(state.storage);
       migrate(state.storage);
 
       const tables = sql
-        .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .exec<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
+        )
         .toArray()
         .map((t) => t.name);
-      expect(tables).not.toContain('work_items');
-      expect(sql.exec('SELECT * FROM todo_versions').toArray()).toEqual([
-        {
-          todo_id: '01JBZZZZZZZZZZZZZZZZZZZZZ1',
-          version: 1,
-          title: 'Renew passport',
-          notes: '',
-          due_date: null,
-          state: 'new',
-          created_at: Date.parse('2026-10-30T08:15:42.123Z'),
-          change: 'create',
-          changed_fields: '["title","notes","dueDate","state"]',
-          changed_at: Date.parse('2026-10-30T08:15:42.123Z'),
-          device_changed_at: null,
-          actor_kind: 'device',
-          actor_id: null,
-        },
-      ]);
+      expect(tables).toEqual(['schema_migrations', 'todo_versions']);
+      expect(sql.exec('SELECT COUNT(*) AS n FROM todo_versions').one()).toEqual({ n: 0 });
+      expect(sql.exec('SELECT version FROM schema_migrations').toArray()).toEqual([{ version: 1 }]);
     });
   });
 });
