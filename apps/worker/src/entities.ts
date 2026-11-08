@@ -1,6 +1,6 @@
 import type { Entity } from '@donext/shared';
 import { mappingsFor } from './db-store';
-import { workItems } from './db/schema';
+import { todoVersions } from './db/schema';
 
 /**
  * Where each kind of entity is stored. The kinds and their rules are listed in
@@ -8,5 +8,5 @@ import { workItems } from './db/schema';
  * and its entity differ.
  */
 export const mappings = mappingsFor<Entity>()({
-  todo: { table: workItems },
+  todo: { table: todoVersions },
 });

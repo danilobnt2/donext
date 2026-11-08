@@ -8,6 +8,7 @@ import {
   type Entity,
   type EntityOf,
   type Kind,
+  type Meta,
 } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
@@ -28,25 +29,39 @@ export class UserStore extends DurableObject<Env> {
     });
   }
 
-  /** Every entity of a type, newest first. */
+  /** Every item's newest version, newest item first. */
   list<K extends Kind>(type: K): EntityOf<K>[] {
     return this.store.list(type);
   }
 
-  /** Applies a change and returns the entity it targets as it now stands. */
+  /** An item's versions, newest first, older than `before` if given. Null if it does not exist. */
+  async versions<K extends Kind>(
+    type: K,
+    id: string,
+    before: number | null,
+    limit: number,
+  ): Promise<EntityOf<K>[] | null> {
+    if (!(await this.store.get(type, id))) return null;
+    return this.store.versions(type, id, before ?? Number.MAX_SAFE_INTEGER, limit);
+  }
+
+  /** Applies a change and returns the newest version of the item it targets. */
   async write<K extends Kind>(
     type: K,
     change: ChangeOf<K>,
+    meta: Meta,
   ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
-    const result = await write(entities[type], this.store, change, Date.now());
+    const result = await write(entities[type], this.store, change, meta, Date.now());
     if (!result.ok) return result;
-    const entity = result.value.find((e) => e.kind === type && e.id === change.id);
-    if (!entity) throw new Error(`Writing ${type} ${change.id} did not produce it.`);
+    const entity =
+      result.value.find((e) => e.kind === type && e.id === change.id) ??
+      (await this.store.get(type, change.id));
+    if (!entity) throw new Error(`Writing ${type} ${change.id} left no version of it.`);
     return { ok: true, value: entity as EntityOf<K> };
   }
 
   /**
-   * Deletes every entity of a type. Lets anyone clear the shared board of unwanted content
+   * Deletes every item of a type with all its versions. Lets anyone clear the shared board of unwanted content
    * until sign-in gives each user their own; remove it then.
    */
   deleteAll(type: Kind): number {

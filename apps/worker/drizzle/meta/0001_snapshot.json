@@ -1,0 +1,145 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "a32e0714-cc62-4470-9e56-847c95bae554",
+  "prevId": "dc0610d3-5099-4727-90b9-d57aea1ec041",
+  "tables": {
+    "todo_versions": {
+      "name": "todo_versions",
+      "columns": {
+        "todo_id": {
+          "name": "todo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "change": {
+          "name": "change",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changed_fields": {
+          "name": "changed_fields",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "changed_at": {
+          "name": "changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_changed_at": {
+          "name": "device_changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "due_date": {
+          "name": "due_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "todo_versions_todo_id_version_pk": {
+          "columns": [
+            "todo_id",
+            "version"
+          ],
+          "name": "todo_versions_todo_id_version_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "todo_versions_version": {
+          "name": "todo_versions_version",
+          "value": "\"todo_versions\".\"version\" >= 1"
+        },
+        "todo_versions_change": {
+          "name": "todo_versions_change",
+          "value": "\"todo_versions\".\"change\" IN ('create', 'edit')"
+        },
+        "todo_versions_actor": {
+          "name": "todo_versions_actor",
+          "value": "json_extract(\"todo_versions\".\"actor\", '$.kind') IN ('device', 'system', 'connector')"
+        },
+        "todo_versions_title": {
+          "name": "todo_versions_title",
+          "value": "\"todo_versions\".\"title\" <> ''"
+        },
+        "todo_versions_due_date": {
+          "name": "todo_versions_due_date",
+          "value": "\"todo_versions\".\"due_date\" IS NULL OR date(\"todo_versions\".\"due_date\") IS \"todo_versions\".\"due_date\""
+        },
+        "todo_versions_state": {
+          "name": "todo_versions_state",
+          "value": "\"todo_versions\".\"state\" IN ('new', 'active', 'pending', 'done', 'abandoned')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

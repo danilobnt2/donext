@@ -1,11 +1,17 @@
+import type { Actor } from './change';
 import type * as Todos from './todo';
 
 export * as Todos from './todo';
 export {
   EntityType,
+  VERSION_LIMIT,
+  oldestKeptVersion,
+  parseDeviceMeta,
   write,
+  type Actor,
   type Checked,
   type EntityBase,
+  type Meta,
   type RuleViolationCode,
   type Store,
 } from './change';
@@ -18,19 +24,52 @@ export {
   type Kind,
 } from './entities';
 
-/** A To-Do as the API returns it. */
+/** A To-Do as the API returns it: its newest version. */
 export interface Todo {
   id: string;
   title: string;
+  notes: string;
+  dueDate: string | null;
   state: Todos.State;
+  /** Number of the newest version. */
+  version: number;
   createdAt: string;
+  updatedAt: string;
 }
 
-export interface CreateTodoRequest {
+/** One version of a To-Do as the API returns it: what, when and who changed it. */
+export interface TodoVersion {
+  version: number;
+  change: Todos.ChangeKind;
+  changedFields: Todos.Field[];
+  /** Server time the change was accepted. */
+  changedAt: string;
+  /** Device time of the change, when the device sent one. */
+  deviceChangedAt: string | null;
+  actor: Actor;
+  todo: Todos.Data;
+}
+
+/** Optional on every write from an app device. */
+export interface DeviceMeta {
+  deviceId?: string;
+  deviceChangedAt?: string;
+}
+
+export interface CreateTodoRequest extends DeviceMeta {
   title: string;
+  notes?: string;
+  dueDate?: string | null;
 }
 
-export type ApiErrorCode = Todos.ViolationCode | 'invalid_json' | 'payload_too_large' | 'not_found';
+export interface EditTodoRequest extends DeviceMeta {
+  title?: string;
+  notes?: string;
+  dueDate?: string | null;
+}
+
+export type ApiErrorCode =
+  Todos.ViolationCode | 'invalid_json' | 'invalid_cursor' | 'payload_too_large' | 'not_found';
 
 export interface ApiError {
   error: { code: ApiErrorCode; message: string };
