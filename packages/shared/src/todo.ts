@@ -1,15 +1,15 @@
 /**
  * Rules for creating and changing To-Dos: pure functions with no platform APIs, so every
  * platform that holds the user's data runs the same ones. Import it as the `Todos`
- * namespace; `kind` is what write() takes.
+ * namespace; `entityType` is what write() and defineEntities() take.
  */
 
 import {
+  EntityType,
   isObject,
   violation,
   type Checked,
   type EntityBase,
-  type Kind,
   type RuleViolationCode,
   type Store,
 } from './change';
@@ -99,4 +99,16 @@ export function apply(
   };
 }
 
-export const kind: Kind<Entity, Change, ViolationCode, Context> = { load, apply };
+class TodoType extends EntityType<Entity, Change, ViolationCode, Context> {
+  readonly kind = 'todo';
+
+  load(store: Store<Entity>, change: Change): Promise<Context> {
+    return load(store, change);
+  }
+
+  apply(context: Context, change: Change, now: number): Checked<Entity[], ViolationCode> {
+    return apply(context, change, now);
+  }
+}
+
+export const entityType = new TodoType();

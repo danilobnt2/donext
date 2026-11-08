@@ -1,8 +1,8 @@
 /**
  * What every change has in common, whatever kind of entity it touches: how a broken rule
- * is reported, and how a change is written. Each kind (To-Dos now, Tasks later) supplies
- * its rules as a Kind; each platform (the Durable Object now, devices later) supplies its
- * storage as a Store; write() joins the two.
+ * is reported, and how a change is written. Each kind (To-Dos now, Tasks later) is an
+ * EntityType with its rules; each platform (the Durable Object now, devices later)
+ * supplies its storage as a Store; write() joins the two.
  */
 
 /** Rule violations any kind of entity can report. Each kind adds its own codes. */
@@ -31,26 +31,40 @@ export interface Store<E extends EntityBase> {
 }
 
 /**
- * The rules for one kind of change. load reads what the rules need; apply decides, as a
- * pure function, which entities to write. A change can touch several entities, of
- * any kind; none means nothing changed.
+ * One kind of entity and the rules for changing it. load reads what the rules need;
+ * apply decides, as a pure function, which entities to write. A change can touch several
+ * entities, of any kind; none means nothing changed. Entities themselves stay plain
+ * data, so they cross JSON, storage and devices unchanged.
  */
-export interface Kind<E extends EntityBase, C, Code extends string, Context> {
-  load(store: Store<E>, change: C): Promise<Context>;
+export abstract class EntityType<E extends EntityBase, C, Code extends string, Context> {
+  abstract readonly kind: E['kind'];
+  abstract load(store: Store<E>, change: C): Promise<Context>;
   /** `now` is the clock of whoever runs the rules, in Unix milliseconds. */
-  apply(context: Context, change: C, now: number): Checked<E[], Code>;
+  abstract apply(context: Context, change: C, now: number): Checked<E[], Code>;
+  /** The types an EntityType works with, for the compiler only. */
+  declare readonly types: { entity: E; change: C; code: Code };
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any EntityType, whatever its types
+type AnyEntityType = EntityType<any, any, any, any>;
 
 /** Applies a change and commits the entities it produces. */
 export async function write<E extends EntityBase, C, Code extends string, Context>(
-  kind: Kind<E, C, Code, Context>,
+  type: EntityType<E, C, Code, Context>,
   store: Store<E>,
   change: C,
   now: number,
 ): Promise<Checked<E[], Code>> {
-  const result = kind.apply(await kind.load(store, change), change, now);
+  const result = type.apply(await type.load(store, change), change, now);
   if (result.ok && result.value.length > 0) await store.commit(result.value);
   return result;
+}
+
+/** Lists the kinds of entity a user's data holds, keyed by kind. */
+export function defineEntities<const X extends readonly AnyEntityType[]>(
+  ...types: X
+): { [T in X[number] as T['kind']]: T } {
+  return Object.fromEntries(types.map((type) => [type.kind, type])) as never;
 }
 
 export function isObject(input: unknown): input is Record<string, unknown> {
