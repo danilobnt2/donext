@@ -1,6 +1,6 @@
 import { Todos, type Kind } from '@donext/shared';
 import { mappingsFor } from './db-store';
-import { todos } from './db/todos';
+import { workItems } from './db/schema';
 
 /**
  * Every type of entity a user's data holds: its stored shape, the changes it accepts
@@ -21,5 +21,8 @@ export const rules: { [K in Type]: Kind<Entity, ChangeOf<K>, CodeOf<K>, unknown>
   todo: Todos.kind,
 };
 
-/** Where each type of entity is stored. */
-export const mappings = mappingsFor<Entity>()({ todo: todos });
+/** Where each type of entity is stored. Fails to compile if a table and its entity differ. */
+export const mappings = mappingsFor<Entity>()({
+  // To-Dos are the rows of work_items whose type is 'todo'.
+  todo: { table: workItems, scope: { key: 'type', value: 'todo' } },
+});
