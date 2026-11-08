@@ -24,7 +24,9 @@ export const TITLE_MAX_LENGTH = 500;
 /** Most To-Dos one board can hold. Becomes the per-user limit once sign-in exists. */
 export const LIMIT = 10_000;
 
-export type State = 'new' | 'active' | 'pending' | 'done';
+export const STATES = ['new', 'active', 'pending', 'done'] as const;
+
+export type State = (typeof STATES)[number];
 
 /** A To-Do as it is stored. Times are Unix milliseconds. */
 export interface Entity extends EntityBase {

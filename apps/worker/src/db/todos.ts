@@ -1,29 +1,16 @@
 import type { Todos } from '@donext/shared';
-import { eq } from 'drizzle-orm';
-import type { Mapping } from '../db-store';
+import type { EntityOf, Mapping } from '../db-store';
 import { workItems } from './schema';
 
 /** To-Dos are the rows of `work_items` whose type is 'todo'. */
-export const todos: Mapping<Todos.Entity, typeof workItems> = {
+export const todos = {
   table: workItems,
-  id: workItems.id,
-  scope: eq(workItems.type, 'todo'),
-  toRow: (todo) => ({
-    id: todo.id,
-    type: 'todo',
-    title: todo.title,
-    state: todo.state,
-    rev: todo.rev,
-    createdAt: new Date(todo.createdAt).toISOString(),
-    updatedAt: new Date(todo.updatedAt).toISOString(),
-  }),
-  fromRow: (row) => ({
-    kind: 'todo',
-    id: row.id,
-    title: row.title,
-    state: row.state as Todos.State,
-    rev: row.rev,
-    createdAt: Date.parse(row.createdAt),
-    updatedAt: Date.parse(row.updatedAt),
-  }),
-};
+  scope: { key: 'type', value: 'todo' },
+} as const satisfies Mapping<typeof workItems>;
+
+/** Fails to compile if the table and the shared To-Do drift apart. */
+type Flat<T> = { [K in keyof T]: T[K] };
+type Same<A, B> =
+  (<T>() => T extends Flat<A> ? 1 : 2) extends <T>() => T extends Flat<B> ? 1 : 2 ? true : false;
+const matches: Same<EntityOf<typeof todos, 'todo'>, Todos.Entity> = true;
+void matches;
