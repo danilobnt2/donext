@@ -1,4 +1,4 @@
-import { Todos, type ApiError, type ApiErrorCode } from '@donext/shared';
+import { Todos, type ApiError, type ApiErrorCode, type Todo } from '@donext/shared';
 import { ulid } from 'ulid';
 import type { UserStore } from './user-store';
 
@@ -24,10 +24,11 @@ export default {
 
     if (pathname === '/api/v1/todos') {
       const store = env.USER_STORE.getByName(SHARED_BOARD);
-      if (request.method === 'GET') return Response.json({ todos: await store.listTodos() });
+      if (request.method === 'GET')
+        return Response.json({ todos: (await store.list('todo')).map(toTodo) });
       if (request.method === 'POST') return createTodo(request, store);
       if (request.method === 'DELETE')
-        return Response.json({ deleted: await store.deleteAllTodos() });
+        return Response.json({ deleted: await store.deleteAll('todo') });
       return new Response(null, { status: 405, headers: { Allow: 'GET, POST, DELETE' } });
     }
 
@@ -55,9 +56,19 @@ async function createTodo(
   const change = Todos.parseCreate(body, ulid());
   if (!change.ok) return ruleError(change);
 
-  const result = await store.writeTodo(change.value);
+  const result = await store.write('todo', change.value);
   if (!result.ok) return ruleError(result);
-  return Response.json({ todo: result.value }, { status: 201 });
+  return Response.json({ todo: toTodo(result.value) }, { status: 201 });
+}
+
+/** A To-Do as the API returns it. */
+function toTodo(todo: Todos.Item): Todo {
+  return {
+    id: todo.id,
+    title: todo.title,
+    state: todo.state,
+    createdAt: new Date(todo.createdAt).toISOString(),
+  };
 }
 
 function ruleError(broken: { code: ApiErrorCode; message: string }): Response {

@@ -1,51 +1,53 @@
 import { DurableObject } from 'cloudflare:workers';
-import { Todos, write, type Checked, type Todo } from '@donext/shared';
+import { write, type Checked } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
-import { todos } from './db/todos';
+import {
+  mappings,
+  rules,
+  type ChangeOf,
+  type CodeOf,
+  type Entity,
+  type EntityOf,
+  type Type,
+} from './entities';
 
 /**
- * One user's data. Until sign-in exists, a single shared instance holds every To-Do.
- * The rules live in @donext/shared; this object only routes requests to them and to its
- * storage.
+ * One user's data. Until sign-in exists, a single shared instance holds everything. It
+ * only routes: the rules live in @donext/shared, the entity types in entities.ts.
  */
 export class UserStore extends DurableObject<Env> {
-  private store!: DbStore<Todos.Item>;
+  private store!: DbStore<Entity>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.store = new DbStore<Todos.Item>(await openDb(ctx.storage), { todo: todos });
+      this.store = new DbStore(await openDb(ctx.storage), mappings);
     });
   }
 
-  listTodos(): Todo[] {
-    return this.store.list('todo').map(toTodo);
+  /** Every entity of a type, newest first. */
+  list<K extends Type>(type: K): EntityOf<K>[] {
+    return this.store.list(type);
   }
 
-  /** Applies a change to a To-Do and returns the To-Do as it now stands. */
-  async writeTodo(change: Todos.Change): Promise<Checked<Todo, Todos.ViolationCode>> {
-    const result = await write(Todos.kind, this.store, change, Date.now());
+  /** Applies a change and returns the entity it targets as it now stands. */
+  async write<K extends Type>(
+    type: K,
+    change: ChangeOf<K>,
+  ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
+    const result = await write(rules[type], this.store, change, Date.now());
     if (!result.ok) return result;
-    const todo = result.value.find((item) => item.id === change.id);
-    if (!todo) throw new Error(`Writing To-Do ${change.id} did not produce it.`);
-    return { ok: true, value: toTodo(todo) };
+    const entity = result.value.find((e) => e.kind === type && e.id === change.id);
+    if (!entity) throw new Error(`Writing ${type} ${change.id} did not produce it.`);
+    return { ok: true, value: entity as EntityOf<K> };
   }
 
   /**
-   * Deletes every To-Do. Lets anyone clear the shared board of unwanted content until
-   * sign-in gives each user their own; remove it then.
+   * Deletes every entity of a type. Lets anyone clear the shared board of unwanted content
+   * until sign-in gives each user their own; remove it then.
    */
-  deleteAllTodos(): number {
-    return this.store.deleteAll('todo');
+  deleteAll(type: Type): number {
+    return this.store.deleteAll(type);
   }
-}
-
-function toTodo(item: Todos.Item): Todo {
-  return {
-    id: item.id,
-    title: item.title,
-    state: item.state,
-    createdAt: new Date(item.createdAt).toISOString(),
-  };
 }
