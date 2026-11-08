@@ -38,7 +38,7 @@ describe('parseEdit', () => {
     expect(Todos.parseEdit({ deviceId: 'x' })).toMatchObject({ ok: false, code: 'invalid_change' });
   });
 
-  it('ignores state: devices never set it directly', () => {
+  it('rejects state: it is not an editable field', () => {
     expect(Todos.parseEdit({ state: 'done' })).toMatchObject({ ok: false, code: 'invalid_change' });
   });
 

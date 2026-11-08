@@ -31,7 +31,10 @@ export interface Data {
 
 export type Field = keyof Data;
 
-/** Which fields a device may set is up to parseCreate and parseEdit, not to this type. */
+/**
+ * An edit never carries state: state follows from a To-Do's Tasks or from explicit
+ * actions (done, abandon, reopen), whichever side runs these rules. parseEdit enforces it.
+ */
 export type Change = { kind: 'create'; fields: Data } | { kind: 'edit'; fields: Partial<Data> };
 
 export type ChangeKind = Change['kind'];
