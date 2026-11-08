@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Todos, write, type Checked, type Meta, type Todo, type TodoVersion } from '@donext/shared';
 import { migrate } from './schema';
 import { SqlStore } from './sql-store';
+import { todoBoard, todoTable } from './todo-table';
 
 /**
  * One user's data. Until sign-in exists, a single shared instance holds every To-Do.
@@ -9,17 +10,17 @@ import { SqlStore } from './sql-store';
  * SQL storage.
  */
 export class UserStore extends DurableObject<Env> {
-  private readonly store: SqlStore;
+  private readonly store: SqlStore<Todos.Version>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
-    this.store = new SqlStore(ctx.storage);
+    this.store = new SqlStore(ctx.storage, { todo: todoTable });
   }
 
   /** To-Dos on the board, newest first. */
   listTodos(): Todo[] {
-    return this.store.currentTodos().map(toTodo);
+    return todoBoard(this.store).map(toTodo);
   }
 
   /** Applies a change to a To-Do and returns the To-Do as it now stands. */
@@ -27,15 +28,18 @@ export class UserStore extends DurableObject<Env> {
     const result = await write(Todos.kind, this.store, change, meta, Date.now());
     if (!result.ok) return result;
     const todo =
-      result.value.find((version) => version.id === change.id) ?? this.store.newestTodo(change.id);
+      result.value.find((version) => version.id === change.id) ??
+      this.store.newestSync('todo', change.id);
     if (!todo) throw new Error(`To-Do ${change.id} vanished during its own write.`);
     return { ok: true, value: toTodo(todo) };
   }
 
   /** Versions of a To-Do, newest first, older than `before` if given. Null if it does not exist. */
   listTodoVersions(id: string, before: number | null, limit: number): TodoVersion[] | null {
-    if (!this.store.newestTodo(id)) return null;
-    return this.store.todoVersions(id, before ?? Number.MAX_SAFE_INTEGER, limit).map(toApiVersion);
+    if (!this.store.newestSync('todo', id)) return null;
+    return this.store
+      .versions('todo', id, before ?? Number.MAX_SAFE_INTEGER, limit)
+      .map(toApiVersion);
   }
 
   /**
@@ -43,7 +47,7 @@ export class UserStore extends DurableObject<Env> {
    * unwanted content until sign-in gives each user their own; remove it then.
    */
   deleteAllTodos(): number {
-    return this.store.deleteAllTodos();
+    return this.store.deleteAll('todo');
   }
 }
 

@@ -1,7 +1,8 @@
 import { Todos, VERSION_LIMIT, type Todo, type TodoVersion } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { migrate } from '../src/schema';
-import { CURRENT_TODOS } from '../src/sql-store';
+import { currentSql } from '../src/sql-store';
+import { todoTable } from '../src/todo-table';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -278,7 +279,7 @@ describe('board reads', () => {
         ['v1000', 1000],
         ['v1000', 1000],
       ]);
-      const cursor = state.storage.sql.exec(CURRENT_TODOS);
+      const cursor = state.storage.sql.exec(currentSql(todoTable));
       cursor.toArray();
       expect(cursor.rowsRead).toBeLessThan(10 * ids.length); // 3,000 versions in total
     });

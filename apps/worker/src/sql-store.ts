@@ -1,67 +1,64 @@
-import type { Actor, Commit, Store, Todos } from '@donext/shared';
+import type { Actor, Commit, Store, VersionBase } from '@donext/shared';
 
-type TodoRow = {
-  todo_id: string;
-  version: number;
-  title: string;
-  notes: string;
-  due_date: string | null;
-  state: Todos.State;
-  created_at: number;
-  change: Todos.ChangeKind;
-  changed_fields: string;
-  changed_at: number;
-  device_changed_at: number | null;
-  actor_kind: Actor['kind'];
-  actor_id: string | null;
-};
+/** A version of any kind, with its data. */
+export type Versioned = VersionBase & { data: unknown };
 
-/** Walks the distinct To-Do ids newest first, one index seek each. */
-const TODO_IDS = `
-  WITH RECURSIVE ids(id) AS (
-    SELECT MAX(todo_id) FROM todo_versions
-    UNION ALL
-    SELECT (SELECT MAX(todo_id) FROM todo_versions WHERE todo_id < ids.id) FROM ids
-    WHERE ids.id IS NOT NULL
-  )`;
+type Row = Record<string, SqlStorageValue>;
 
 /**
- * Each To-Do's newest version. Reads grow with the number of To-Dos, not with their
- * versions.
+ * How one kind's versions map to its SQL table. Every versions table has the same common
+ * columns; a Table maps only what differs: the table, its id column, and the data.
+ * Names are interpolated into SQL, so they must be code constants, never input.
  */
-export const CURRENT_TODOS = `${TODO_IDS}
-  SELECT v.* FROM ids
-  JOIN todo_versions v ON v.todo_id = ids.id
-    AND v.version = (SELECT MAX(version) FROM todo_versions WHERE todo_id = ids.id)`;
+export interface Table<V extends Versioned> {
+  kind: V['kind'];
+  name: string;
+  idColumn: string;
+  dataToRow(data: V['data']): Row;
+  dataFromRow(row: Row): V['data'];
+}
+
+/** One Table per kind the store holds. */
+export type Tables<V extends Versioned> = { [K in V['kind']]: Table<Extract<V, { kind: K }>> };
+
+const IDENTIFIER = /^[a-z_]+$/;
 
 /**
- * The Durable Object's Store. Its methods run synchronous SQL and never wait on I/O, so
- * no other request runs between a write's load and its commit.
+ * The Durable Object's Store, for every kind it is given a Table for. Its methods run
+ * synchronous SQL and never wait on I/O, so no other request runs between a write's load
+ * and its commit.
  */
-export class SqlStore implements Store<Todos.Version> {
-  constructor(private readonly storage: DurableObjectStorage) {}
-
-  async newest<K extends 'todo'>(_kind: K, id: string) {
-    return this.newestTodo(id) as Extract<Todos.Version, { kind: K }> | null;
+export class SqlStore<V extends Versioned> implements Store<V> {
+  constructor(
+    private readonly storage: DurableObjectStorage,
+    private readonly tables: Tables<V>,
+  ) {
+    for (const table of Object.values<Table<V>>(this.tables)) {
+      identifiers(table.name, table.idColumn);
+    }
   }
 
-  async count(): Promise<number> {
-    return this.countTodos();
+  async newest<K extends V['kind']>(kind: K, id: string): Promise<Extract<V, { kind: K }> | null> {
+    return this.newestSync(kind, id);
   }
 
-  async commit(commits: Commit<Todos.Version>[]): Promise<void> {
+  async count(kind: V['kind']): Promise<number> {
+    return this.countSync(kind);
+  }
+
+  async commit(commits: Commit<V>[]): Promise<void> {
     this.storage.transactionSync(() => {
       for (const { version, keepFrom } of commits) {
-        const row = toRow(version);
+        const table = this.table(version.kind);
+        const row = toRow(table, version);
+        const columns = identifiers(...Object.keys(row));
         this.storage.sql.exec(
-          `INSERT INTO todo_versions (${Object.keys(row).join(', ')})
-           VALUES (${Object.keys(row)
-             .map(() => '?')
-             .join(', ')})`,
+          `INSERT INTO ${table.name} (${columns.join(', ')})
+           VALUES (${columns.map(() => '?').join(', ')})`,
           ...Object.values(row),
         );
         this.storage.sql.exec(
-          'DELETE FROM todo_versions WHERE todo_id = ? AND version < ?',
+          `DELETE FROM ${table.name} WHERE ${table.idColumn} = ? AND version < ?`,
           version.id,
           keepFrom,
         );
@@ -69,61 +66,91 @@ export class SqlStore implements Store<Todos.Version> {
     });
   }
 
-  /** Every To-Do's newest version that is still on the board, newest To-Do first. */
-  currentTodos(): Todos.Version[] {
-    return this.storage.sql
-      .exec<TodoRow>(`${CURRENT_TODOS} WHERE v.state <> 'abandoned' ORDER BY v.todo_id DESC`)
-      .toArray()
-      .map(toVersion);
-  }
-
-  newestTodo(id: string): Todos.Version | null {
+  newestSync<K extends V['kind']>(kind: K, id: string): Extract<V, { kind: K }> | null {
+    const table = this.table(kind);
     const row = this.storage.sql
-      .exec<TodoRow>(
-        'SELECT * FROM todo_versions WHERE todo_id = ? ORDER BY version DESC LIMIT 1',
+      .exec<Row>(
+        `SELECT * FROM ${table.name} WHERE ${table.idColumn} = ? ORDER BY version DESC LIMIT 1`,
         id,
       )
       .toArray()[0];
-    return row ? toVersion(row) : null;
+    return row ? fromRow(table, row) : null;
   }
 
-  /** Versions of a To-Do, newest first, older than `before`. */
-  todoVersions(id: string, before: number, limit: number): Todos.Version[] {
+  /** Every item's newest version, newest item first. */
+  current<K extends V['kind']>(kind: K): Extract<V, { kind: K }>[] {
+    const table = this.table(kind);
     return this.storage.sql
-      .exec<TodoRow>(
-        'SELECT * FROM todo_versions WHERE todo_id = ? AND version < ? ORDER BY version DESC LIMIT ?',
+      .exec<Row>(`${currentSql(table)} ORDER BY ids.id DESC`)
+      .toArray()
+      .map((row) => fromRow(table, row));
+  }
+
+  /** Versions of an item, newest first, older than `before`. */
+  versions<K extends V['kind']>(
+    kind: K,
+    id: string,
+    before: number,
+    limit: number,
+  ): Extract<V, { kind: K }>[] {
+    const table = this.table(kind);
+    return this.storage.sql
+      .exec<Row>(
+        `SELECT * FROM ${table.name} WHERE ${table.idColumn} = ? AND version < ?
+         ORDER BY version DESC LIMIT ?`,
         id,
         before,
         limit,
       )
       .toArray()
-      .map(toVersion);
+      .map((row) => fromRow(table, row));
   }
 
-  countTodos(): number {
+  countSync(kind: V['kind']): number {
+    const table = this.table(kind);
     return this.storage.sql
-      .exec<{ count: number }>(`${TODO_IDS} SELECT COUNT(id) AS count FROM ids`)
+      .exec<{ count: number }>(`${idsSql(table)} SELECT COUNT(id) AS count FROM ids`)
       .one().count;
   }
 
-  /** Deletes every To-Do with all its versions and returns how many there were. */
-  deleteAllTodos(): number {
+  /** Deletes every item of a kind with all its versions and returns how many there were. */
+  deleteAll(kind: V['kind']): number {
     return this.storage.transactionSync(() => {
-      const count = this.countTodos();
-      this.storage.sql.exec('DELETE FROM todo_versions');
+      const count = this.countSync(kind);
+      this.storage.sql.exec(`DELETE FROM ${this.table(kind).name}`);
       return count;
     });
   }
+
+  private table<K extends V['kind']>(kind: K): Table<Extract<V, { kind: K }>> {
+    return this.tables[kind];
+  }
 }
 
-function toRow(version: Todos.Version): TodoRow {
+/** Walks a table's distinct item ids newest first, one index seek each. */
+function idsSql(table: Pick<Table<Versioned>, 'name' | 'idColumn'>): string {
+  const { name, idColumn: id } = table;
+  return `WITH RECURSIVE ids(id) AS (
+    SELECT MAX(${id}) FROM ${name}
+    UNION ALL
+    SELECT (SELECT MAX(${id}) FROM ${name} WHERE ${id} < ids.id) FROM ids
+    WHERE ids.id IS NOT NULL
+  )`;
+}
+
+/** Each item's newest version. Reads grow with the number of items, not their versions. */
+export function currentSql(table: Pick<Table<Versioned>, 'name' | 'idColumn'>): string {
+  const { name, idColumn: id } = table;
+  return `${idsSql(table)}
+  SELECT v.* FROM ids
+  JOIN ${name} v ON v.${id} = ids.id
+    AND v.version = (SELECT MAX(version) FROM ${name} WHERE ${id} = ids.id)`;
+}
+
+function toRow<V extends Versioned>(table: Table<V>, version: V): Row {
   return {
-    todo_id: version.id,
+    [table.idColumn]: version.id,
     version: version.version,
-    title: version.data.title,
-    notes: version.data.notes,
-    due_date: version.data.dueDate,
-    state: version.data.state,
     created_at: version.createdAt,
     change: version.change,
     changed_fields: JSON.stringify(version.changedFields),
@@ -131,20 +158,28 @@ function toRow(version: Todos.Version): TodoRow {
     device_changed_at: version.deviceChangedAt,
     actor_kind: version.actor.kind,
     actor_id: version.actor.id,
+    ...table.dataToRow(version.data),
   };
 }
 
-function toVersion(row: TodoRow): Todos.Version {
+function fromRow<V extends Versioned>(table: Table<V>, row: Row): V {
   return {
-    kind: 'todo',
-    id: row.todo_id,
+    kind: table.kind,
+    id: row[table.idColumn],
     version: row.version,
     createdAt: row.created_at,
     change: row.change,
-    changedFields: JSON.parse(row.changed_fields) as Todos.Field[],
+    changedFields: JSON.parse(row.changed_fields as string),
     changedAt: row.changed_at,
     deviceChangedAt: row.device_changed_at,
     actor: { kind: row.actor_kind, id: row.actor_id } as Actor,
-    data: { title: row.title, notes: row.notes, dueDate: row.due_date, state: row.state },
-  };
+    data: table.dataFromRow(row),
+  } as V;
+}
+
+function identifiers(...names: string[]): string[] {
+  for (const name of names) {
+    if (!IDENTIFIER.test(name)) throw new Error(`Not a safe SQL identifier: ${name}`);
+  }
+  return names;
 }
