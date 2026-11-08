@@ -10,6 +10,8 @@
   "workers_dev": false,
   "preview_urls": false,
   "observability": { "enabled": true },
+  // Drizzle's generated migrations import their SQL files as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   "assets": {
     "directory": "../web/dist",
     "not_found_handling": "single-page-application",
