@@ -5,6 +5,8 @@ import {
   type ApiErrorCode,
   type Todo,
   type TodoVersion,
+  type Entity,
+  type Writes,
 } from '@donext/shared';
 import { ulid } from 'ulid';
 import type { UserStore } from './user-store';
@@ -42,11 +44,15 @@ export default {
 
     if (pathname === '/api/v1/todos') {
       if (request.method === 'GET') {
-        return Response.json({ todos: (await store.list('todo')).map(toTodo) });
+        const board = await store.newestPer('todoVersion', 'todoId', 'version');
+        return Response.json({ todos: board.map(toTodo) });
       }
       if (request.method === 'POST') return createTodo(request, store);
       if (request.method === 'DELETE') {
-        return Response.json({ deleted: await store.deleteAll('todo') });
+        // Reports To-Dos, not versions; the brief gap between the two calls is harmless here.
+        const deleted = await store.count('todoVersion', 'todoId');
+        await store.deleteAll('todoVersion');
+        return Response.json({ deleted });
       }
       return methodNotAllowed('GET, POST, DELETE');
     }
@@ -76,9 +82,12 @@ async function createTodo(request: Request, store: UserStub): Promise<Response> 
   const meta = parseDeviceMeta(body);
   if (!meta.ok) return ruleError(meta);
 
-  const result = await store.write('todo', change.value, meta.value);
+  const result = await store.write('todoVersion', change.value, meta.value);
   if (!result.ok) return ruleError(result);
-  return Response.json({ todo: toTodo(result.value) }, { status: 201 });
+  return Response.json(
+    { todo: toTodo(await written(store, change.value.todoId, result.value)) },
+    { status: 201 },
+  );
 }
 
 async function editTodo(request: Request, store: UserStub, id: string): Promise<Response> {
@@ -89,9 +98,9 @@ async function editTodo(request: Request, store: UserStub, id: string): Promise<
   const meta = parseDeviceMeta(body);
   if (!meta.ok) return ruleError(meta);
 
-  const result = await store.write('todo', change.value, meta.value);
+  const result = await store.write('todoVersion', change.value, meta.value);
   if (!result.ok) return ruleError(result);
-  return Response.json({ todo: toTodo(result.value) });
+  return Response.json({ todo: toTodo(await written(store, id, result.value)) });
 }
 
 async function listVersions(url: URL, store: UserStub, id: string): Promise<Response> {
@@ -100,17 +109,39 @@ async function listVersions(url: URL, store: UserStub, id: string): Promise<Resp
   if (before !== null && !(Number.isSafeInteger(before) && before >= 1)) {
     return apiError(400, 'invalid_cursor', 'before must be a version number.');
   }
-  const versions = await store.versions('todo', id, before, VERSIONS_PAGE_SIZE);
-  if (!versions) return apiError(404, 'not_found', 'No such To-Do.');
+  const versions = await store.find('todoVersion', {
+    where: { todoId: id },
+    ...(before === null ? {} : { before: { field: 'version' as const, value: before } }),
+    orderBy: { field: 'version', desc: true },
+    limit: VERSIONS_PAGE_SIZE,
+  });
+  if (versions.length === 0 && before === null) return apiError(404, 'not_found', 'No such To-Do.');
   const last = versions.at(-1);
   const nextBefore = versions.length === VERSIONS_PAGE_SIZE && last ? last.version : null;
   return Response.json({ versions: versions.map(toTodoVersion), nextBefore });
 }
 
+/** The To-Do's version a write appended or, if it changed nothing, its newest one. */
+async function written(
+  store: UserStub,
+  todoId: string,
+  writes: Writes<Entity>,
+): Promise<Todos.Entity> {
+  const appended = writes.put.find((e) => e.kind === 'todoVersion' && e.todoId === todoId);
+  if (appended) return appended;
+  const [newest] = await store.find('todoVersion', {
+    where: { todoId },
+    orderBy: { field: 'version', desc: true },
+    limit: 1,
+  });
+  if (!newest) throw new Error(`To-Do ${todoId} has no version after a write.`);
+  return newest;
+}
+
 /** A To-Do as the API returns it: its newest version. */
 function toTodo(todo: Todos.Entity): Todo {
   return {
-    id: todo.id,
+    id: todo.todoId,
     title: todo.title,
     notes: todo.notes,
     dueDate: todo.dueDate,

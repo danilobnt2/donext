@@ -1,4 +1,5 @@
 CREATE TABLE `todo_versions` (
+	`id` text PRIMARY KEY NOT NULL,
 	`todo_id` text NOT NULL,
 	`version` integer NOT NULL,
 	`created_at` integer NOT NULL,
@@ -11,7 +12,6 @@ CREATE TABLE `todo_versions` (
 	`notes` text NOT NULL,
 	`due_date` text,
 	`state` text NOT NULL,
-	PRIMARY KEY(`todo_id`, `version`),
 	CONSTRAINT "todo_versions_version" CHECK("todo_versions"."version" >= 1),
 	CONSTRAINT "todo_versions_change" CHECK("todo_versions"."change" IN ('create', 'edit')),
 	CONSTRAINT "todo_versions_actor" CHECK(json_extract("todo_versions"."actor", '$.kind') IN ('device', 'system', 'connector')),
@@ -20,4 +20,5 @@ CREATE TABLE `todo_versions` (
 	CONSTRAINT "todo_versions_state" CHECK("todo_versions"."state" IN ('new', 'active', 'pending', 'done', 'abandoned'))
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `todo_versions_todo_version` ON `todo_versions` (`todo_id`,`version`);--> statement-breakpoint
 DROP TABLE `work_items`;

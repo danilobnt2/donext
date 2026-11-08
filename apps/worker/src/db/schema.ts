@@ -1,24 +1,21 @@
 import { Todos, type Actor } from '@donext/shared';
 import { sql } from 'drizzle-orm';
-import { check, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /**
- * Schema of the per-user SQLite database. After changing it, run
- * `pnpm --filter @donext/worker db:generate` and commit the migration it writes to
- * `drizzle/`. Never edit a migration that has shipped.
+ * Schema of the per-user SQLite database: one table per kind of entity. After changing
+ * it, run `pnpm --filter @donext/worker db:generate` and commit the migration it writes
+ * to `drizzle/`. Never edit a migration that has shipped.
  *
- * Each kind of entity has its own versions table: one row per version of an item, never
- * updated. Columns read and write the shapes the shared entities use, so rows need no
- * mapping. Times are Unix milliseconds.
+ * Columns read and write the shapes the shared entities use, so rows need no mapping.
+ * Times are Unix milliseconds.
  */
 
-/** The columns every versions table has; `idColumn` names its item id column. */
+/** The columns of a table whose entities are versions (see versions.ts in @donext/shared). */
 function versionColumns<Change extends string, Field extends string>(
-  idColumn: string,
   changes: readonly [Change, ...Change[]],
 ) {
   return {
-    id: text(idColumn).notNull(),
     version: integer('version').notNull(),
     createdAt: integer('created_at').notNull(),
     change: text('change', { enum: changes }).notNull(),
@@ -32,14 +29,16 @@ function versionColumns<Change extends string, Field extends string>(
 export const todoVersions = sqliteTable(
   'todo_versions',
   {
-    ...versionColumns<Todos.ChangeKind, Todos.Field>('todo_id', Todos.CHANGES),
+    id: text('id').primaryKey(),
+    todoId: text('todo_id').notNull(),
+    ...versionColumns<Todos.ChangeKind, Todos.Field>(Todos.CHANGES),
     title: text('title').notNull(),
     notes: text('notes').notNull(),
     dueDate: text('due_date'),
     state: text('state', { enum: Todos.STATES }).notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.id, t.version] }),
+    uniqueIndex('todo_versions_todo_version').on(t.todoId, t.version),
     check('todo_versions_version', sql`${t.version} >= 1`),
     check('todo_versions_change', sql`${t.change} IN ('create', 'edit')`),
     check(

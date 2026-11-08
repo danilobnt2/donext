@@ -2,7 +2,7 @@ import { Todos, VERSION_LIMIT, type Todo, type TodoVersion } from '@donext/share
 import { runInDurableObject } from 'cloudflare:test';
 import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import { openDb } from '../src/db';
-import { newestVersions } from '../src/db-store';
+import { newestPerSql } from '../src/db-store';
 import { todoVersions } from '../src/db/schema';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -32,7 +32,9 @@ const versionsOf = async (id: string, query = '') =>
   }>();
 /** The board query as SQL text, to measure what it reads. */
 const newestVersionsQuery = () => {
-  const { sql, params } = new SQLiteSyncDialect().sqlToQuery(newestVersions(todoVersions));
+  const { sql, params } = new SQLiteSyncDialect().sqlToQuery(
+    newestPerSql(todoVersions, todoVersions.todoId, todoVersions.version),
+  );
   return [sql, ...params] as const;
 };
 const created = async (body: unknown) => (await (await post(body)).json<{ todo: Todo }>()).todo;
@@ -42,9 +44,9 @@ const seedVersions = (id: string, from: number, count: number) =>
   runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
     state.storage.sql.exec(
       `WITH RECURSIVE n(i) AS (SELECT CAST(?1 AS INTEGER) UNION ALL SELECT i + 1 FROM n WHERE i < ?2)
-       INSERT INTO todo_versions (todo_id, version, title, notes, due_date, state, created_at,
+       INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
          change, changed_fields, changed_at, device_changed_at, actor)
-       SELECT ?3, i, 'v' || i, '', NULL, 'new',
+       SELECT ?3 || ':' || i, ?3, i, 'v' || i, '', NULL, 'new',
          (SELECT MIN(created_at) FROM todo_versions WHERE todo_id = ?3),
          'edit', '["title"]', i, NULL, '{"kind":"device","id":null}'
        FROM n`,
@@ -114,9 +116,9 @@ describe('/api/v1/todos', () => {
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO todo_versions (todo_id, version, title, notes, due_date, state, created_at,
+         INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
            change, changed_fields, changed_at, device_changed_at, actor)
-         SELECT printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
            '{"kind":"device","id":null}'
          FROM n`,
         Todos.LIMIT,
@@ -131,9 +133,9 @@ describe('/api/v1/todos', () => {
     await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO todo_versions (todo_id, version, title, notes, due_date, state, created_at,
+         INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
            change, changed_fields, changed_at, device_changed_at, actor)
-         SELECT printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
            '{"kind":"device","id":null}'
          FROM n`,
         Todos.LIMIT - 1,
@@ -280,7 +282,9 @@ describe('board reads', () => {
     for (const id of ids) await seedVersions(id, 2, VERSION_LIMIT - 1);
 
     await runInDurableObject(env.USER_STORE.getByName('shared-board'), (instance, state) => {
-      expect(instance.list('todo').map((t) => [t.title, t.version])).toEqual([
+      expect(
+        instance.newestPer('todoVersion', 'todoId', 'version').map((t) => [t.title, t.version]),
+      ).toEqual([
         ['v1000', 1000],
         ['v1000', 1000],
         ['v1000', 1000],

@@ -8,7 +8,10 @@ import {
   type Entity,
   type EntityOf,
   type Kind,
+  type FieldOf,
   type Meta,
+  type Query,
+  type Writes,
 } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
@@ -16,8 +19,8 @@ import { mappings } from './entities';
 
 /**
  * One user's data. Until sign-in exists, a single shared instance holds everything. It
- * only routes: the kinds of entity and their rules live in @donext/shared, their tables in
- * entities.ts.
+ * knows no kind of entity: the kinds and their rules live in @donext/shared, their tables
+ * in entities.ts, and what a request means in the HTTP layer.
  */
 export class UserStore extends DurableObject<Env> {
   private store!: DbStore<Entity>;
@@ -29,42 +32,41 @@ export class UserStore extends DurableObject<Env> {
     });
   }
 
-  /** Every item's newest version, newest item first. */
-  list<K extends Kind>(type: K): EntityOf<K>[] {
-    return this.store.list(type);
+  get<K extends Kind>(kind: K, id: string): Promise<EntityOf<K> | null> {
+    return this.store.get(kind, id);
   }
 
-  /** An item's versions, newest first, older than `before` if given. Null if it does not exist. */
-  async versions<K extends Kind>(
-    type: K,
-    id: string,
-    before: number | null,
-    limit: number,
-  ): Promise<EntityOf<K>[] | null> {
-    if (!(await this.store.get(type, id))) return null;
-    return this.store.versions(type, id, before ?? Number.MAX_SAFE_INTEGER, limit);
+  find<K extends Kind>(kind: K, query?: Query<EntityOf<K>>): EntityOf<K>[] {
+    return this.store.findSync(kind, query);
   }
 
-  /** Applies a change and returns the newest version of the item it targets. */
-  async write<K extends Kind>(
-    type: K,
+  count<K extends Kind>(kind: K, distinct?: FieldOf<EntityOf<K>>): number {
+    return this.store.countSync(kind, distinct as FieldOf<Extract<Entity, { kind: K }>>);
+  }
+
+  newestPer<K extends Kind>(
+    kind: K,
+    groupBy: FieldOf<EntityOf<K>>,
+    orderBy: FieldOf<EntityOf<K>>,
+  ): EntityOf<K>[] {
+    type Field = FieldOf<Extract<Entity, { kind: K }>>;
+    return this.store.newestPerSync(kind, groupBy as Field, orderBy as Field);
+  }
+
+  /** Applies a change with its kind's rules and returns what it wrote. */
+  write<K extends Kind>(
+    kind: K,
     change: ChangeOf<K>,
     meta: Meta,
-  ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
-    const result = await write(entities[type], this.store, change, meta, Date.now());
-    if (!result.ok) return result;
-    const entity =
-      result.value.find((e) => e.kind === type && e.id === change.id) ??
-      (await this.store.get(type, change.id));
-    if (!entity) throw new Error(`Writing ${type} ${change.id} left no version of it.`);
-    return { ok: true, value: entity as EntityOf<K> };
+  ): Promise<Checked<Writes<Entity>, CodeOf<K>>> {
+    return write(entities[kind], this.store, change, meta, Date.now());
   }
 
   /**
-   * Deletes every item of a type with all its versions. Lets anyone clear the shared board of unwanted content
-   * until sign-in gives each user their own; remove it then.
+   * Deletes every entity of a kind and returns how many there were. Lets anyone clear the
+   * shared board of unwanted content until sign-in gives each user their own; remove it then.
    */
-  deleteAll(type: Kind): number {
-    return this.store.deleteAll(type);
+  deleteAll(kind: Kind): number {
+    return this.store.deleteAll(kind);
   }
 }

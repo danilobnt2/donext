@@ -1,15 +1,14 @@
-import { oldestKeptVersion, type EntityBase, type Store } from '@donext/shared';
-import { and, desc, eq, getTableColumns, lt, sql, type SQL } from 'drizzle-orm';
+import type { EntityBase, FieldOf, Query, Store, Writes } from '@donext/shared';
+import { and, asc, count, desc, eq, getTableColumns, lt, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { Db } from './db';
 
-/** A versions table: one row per version, keyed by the item's `id` and its `version`. */
-export type EntityTable = SQLiteTable & { id: SQLiteColumn; version: SQLiteColumn };
+/** A table that holds one kind of entity: its key is exposed as `id`. */
+export type EntityTable = SQLiteTable & { id: SQLiteColumn };
 
 /**
- * Where one type of entity lives: its own versions table. Drizzle's column definitions do
- * the row mapping; the store only adds the entity's `kind` on reads and leaves it out on
- * writes.
+ * Where one kind of entity lives: its own table. Drizzle's column definitions do the row
+ * mapping; the store only adds the entity's `kind` on reads and leaves it out on writes.
  */
 export interface Mapping<T extends EntityTable = EntityTable> {
   table: T;
@@ -23,7 +22,7 @@ type StoredEntity<M extends Mapping, K extends string> = Omit<
   kind: K;
 };
 
-/** One Mapping per type of entity the store holds. */
+/** One Mapping per kind of entity the store holds. */
 export type Mappings<E extends EntityBase> = { [K in E['kind']]: Mapping };
 
 type Flat<T> = { [K in keyof T]: T[K] };
@@ -49,32 +48,37 @@ export function mappingsFor<E extends EntityBase>() {
 
 type Row = Record<string, unknown>;
 
-/** Walks a table's distinct item ids newest first, one index seek each. */
-function itemIds(table: EntityTable): SQL {
-  return sql`WITH RECURSIVE ids(id) AS (
-    SELECT MAX(${table.id}) FROM ${table}
+/** A Filter of any kind, as the store reads it. */
+type AnyFilter = { where?: Row; before?: { field: string; value: unknown } };
+
+/** Walks the distinct values of a column, highest first, one index seek each. */
+function distinctValues(table: SQLiteTable, column: SQLiteColumn): SQL {
+  return sql`WITH RECURSIVE vals(v) AS (
+    SELECT MAX(${column}) FROM ${table}
     UNION ALL
-    SELECT (SELECT MAX(${table.id}) FROM ${table} WHERE ${table.id} < ids.id) FROM ids
-    WHERE ids.id IS NOT NULL
+    SELECT (SELECT MAX(${column}) FROM ${table} WHERE ${column} < vals.v) FROM vals
+    WHERE vals.v IS NOT NULL
   )`;
 }
 
 /**
- * Each item's newest version, newest item first. Reads grow with the number of items,
- * not with their versions.
+ * For each value of `group`, the row with the highest `order`; highest group first. Reads
+ * grow with the number of groups, not with the rows in each, given an index on both.
  */
-export function newestVersions(table: EntityTable): SQL {
-  return sql`${itemIds(table)}
-    SELECT v.* FROM ids
-    JOIN ${table} v ON v.${sql.identifier(table.id.name)} = ids.id
-      AND v.version = (SELECT MAX(${table.version}) FROM ${table} WHERE ${table.id} = ids.id)
-    ORDER BY ids.id DESC`;
+export function newestPerSql(table: SQLiteTable, group: SQLiteColumn, order: SQLiteColumn): SQL {
+  const g = sql.identifier(group.name);
+  const o = sql.identifier(order.name);
+  return sql`${distinctValues(table, group)}
+    SELECT t.* FROM vals
+    JOIN ${table} t ON t.${g} = vals.v
+      AND t.${o} = (SELECT MAX(${order}) FROM ${table} WHERE ${group} = vals.v)
+    ORDER BY vals.v DESC`;
 }
 
 /**
  * The Durable Object's Store, on its Drizzle database, for whatever entities it is given
- * a Mapping for. Its queries run synchronously and never wait on I/O, so no other request
- * runs between a write's load and its commit.
+ * a Mapping for. It knows nothing about what entities mean. Its queries run synchronously
+ * and never wait on I/O, so no other request runs between a write's load and its commit.
  */
 export class DbStore<E extends EntityBase> implements Store<E> {
   constructor(
@@ -84,78 +88,103 @@ export class DbStore<E extends EntityBase> implements Store<E> {
 
   async get<K extends E['kind']>(kind: K, id: string): Promise<Extract<E, { kind: K }> | null> {
     const { table } = this.mappings[kind];
-    const row = this.db
-      .select()
-      .from(table)
-      .where(eq(table.id, id))
-      .orderBy(desc(table.version))
-      .limit(1)
-      .get();
+    const row = this.db.select().from(table).where(eq(table.id, id)).get();
     return row ? this.toEntity(kind, row) : null;
   }
 
-  async count(kind: E['kind']): Promise<number> {
-    return this.countSync(kind);
+  async find<K extends E['kind']>(
+    kind: K,
+    query: Query<Extract<E, { kind: K }>> = {},
+  ): Promise<Extract<E, { kind: K }>[]> {
+    return this.findSync(kind, query);
   }
 
-  async commit(versions: E[]): Promise<void> {
+  async count<K extends E['kind']>(
+    kind: K,
+    distinct?: FieldOf<Extract<E, { kind: K }>>,
+  ): Promise<number> {
+    return this.countSync(kind, distinct);
+  }
+
+  async newestPer<K extends E['kind']>(
+    kind: K,
+    groupBy: FieldOf<Extract<E, { kind: K }>>,
+    orderBy: FieldOf<Extract<E, { kind: K }>>,
+  ): Promise<Extract<E, { kind: K }>[]> {
+    return this.newestPerSync(kind, groupBy, orderBy);
+  }
+
+  async commit(writes: Writes<E>): Promise<void> {
     this.db.transaction((tx) => {
-      for (const version of versions) {
-        const { table } = this.mappings[version.kind as E['kind']];
-        const row = { ...version } as Row;
-        delete row.kind;
-        tx.insert(table).values(row).run();
+      for (const filter of writes.delete) {
+        const { table } = this.mappings[filter.kind as E['kind']];
         tx.delete(table)
-          .where(
-            and(eq(table.id, version.id), lt(table.version, oldestKeptVersion(version.version))),
-          )
+          .where(this.where(table, filter as AnyFilter))
           .run();
+      }
+      for (const entity of writes.put) {
+        const { table } = this.mappings[entity.kind as E['kind']];
+        const row = { ...entity } as Row;
+        delete row.kind;
+        tx.insert(table).values(row).onConflictDoUpdate({ target: table.id, set: row }).run();
       }
     });
   }
 
-  /** Every item's newest version, newest item first. */
-  list<K extends E['kind']>(kind: K): Extract<E, { kind: K }>[] {
-    const { table } = this.mappings[kind];
-    return this.db
-      .all<Row>(newestVersions(table))
-      .map((row) => this.toEntity(kind, this.decode(table, row)));
-  }
-
-  /** An item's versions, newest first, older than `before`. */
-  versions<K extends E['kind']>(
+  findSync<K extends E['kind']>(
     kind: K,
-    id: string,
-    before: number,
-    limit: number,
+    query: Query<Extract<E, { kind: K }>> = {},
   ): Extract<E, { kind: K }>[] {
     const { table } = this.mappings[kind];
-    return this.db
+    const order = query.orderBy;
+    const column = order && this.column(table, order.field);
+    let select = this.db
       .select()
       .from(table)
-      .where(and(eq(table.id, id), lt(table.version, before)))
-      .orderBy(desc(table.version))
-      .limit(limit)
-      .all()
-      .map((row) => this.toEntity(kind, row));
+      .where(this.where(table, query as AnyFilter))
+      .$dynamic();
+    if (column) select = select.orderBy(order.desc ? desc(column) : asc(column));
+    if (query.limit !== undefined) select = select.limit(query.limit);
+    return select.all().map((row) => this.toEntity(kind, row));
   }
 
-  /** Deletes every item of a kind with all its versions and returns how many there were. */
+  countSync<K extends E['kind']>(kind: K, distinct?: FieldOf<Extract<E, { kind: K }>>): number {
+    const { table } = this.mappings[kind];
+    if (!distinct) return this.db.select({ n: count() }).from(table).get()?.n ?? 0;
+    const values = distinctValues(table, this.column(table, distinct));
+    return this.db.get<{ n: number }>(sql`${values} SELECT COUNT(v) AS n FROM vals`)?.n ?? 0;
+  }
+
+  newestPerSync<K extends E['kind']>(
+    kind: K,
+    groupBy: FieldOf<Extract<E, { kind: K }>>,
+    orderBy: FieldOf<Extract<E, { kind: K }>>,
+  ): Extract<E, { kind: K }>[] {
+    const { table } = this.mappings[kind];
+    const query = newestPerSql(table, this.column(table, groupBy), this.column(table, orderBy));
+    return this.db.all<Row>(query).map((row) => this.toEntity(kind, this.decode(table, row)));
+  }
+
+  /** Deletes every entity of a kind and returns how many there were. */
   deleteAll(kind: E['kind']): number {
     const { table } = this.mappings[kind];
-    return this.db.transaction(() => {
-      const items = this.countSync(kind);
-      this.db.delete(table).run();
-      return items;
-    });
+    return this.db.delete(table).returning({ id: table.id }).all().length;
   }
 
-  private countSync(kind: E['kind']): number {
-    const { table } = this.mappings[kind];
-    return (
-      this.db.get<{ count: number }>(sql`${itemIds(table)} SELECT COUNT(id) AS count FROM ids`)
-        ?.count ?? 0
+  private where(table: EntityTable, filter: AnyFilter): SQL | undefined {
+    const conditions = Object.entries(filter.where ?? {}).map(([field, value]) =>
+      eq(this.column(table, field), value),
     );
+    if (filter.before) {
+      conditions.push(lt(this.column(table, filter.before.field), filter.before.value));
+    }
+    return and(...conditions);
+  }
+
+  private column(table: EntityTable, field: string): SQLiteColumn {
+    const column = getTableColumns(table)[field];
+    if (!column) throw new Error(`${field} is not a column of ${table._.name}.`);
+    return column;
   }
 
   /** Maps a raw row, keyed by column name, through the table's column definitions. */

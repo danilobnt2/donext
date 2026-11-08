@@ -1,12 +1,19 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a32e0714-cc62-4470-9e56-847c95bae554",
+  "id": "e32835cb-df4a-4bbc-a542-515aa1d5d861",
   "prevId": "dc0610d3-5099-4727-90b9-d57aea1ec041",
   "tables": {
     "todo_versions": {
       "name": "todo_versions",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
         "todo_id": {
           "name": "todo_id",
           "type": "text",
@@ -92,17 +99,18 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "todo_versions_todo_id_version_pk": {
+      "indexes": {
+        "todo_versions_todo_version": {
+          "name": "todo_versions_todo_version",
           "columns": [
             "todo_id",
             "version"
           ],
-          "name": "todo_versions_todo_id_version_pk"
+          "isUnique": true
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
         "todo_versions_version": {

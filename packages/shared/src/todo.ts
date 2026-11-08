@@ -1,7 +1,9 @@
 /**
  * Rules for creating and changing To-Dos: pure functions with no platform APIs, so every
- * platform that holds the user's data runs the same ones. Import it as the `Todos`
- * namespace; `entityType` is what write() and defineEntities() take.
+ * platform that holds the user's data runs the same ones. A To-Do is kept as To-Do
+ * versions, an entity type like any other: each change appends one, and the newest is the
+ * To-Do's current state. Import it as the `Todos` namespace; `entityType` is what write()
+ * and defineEntities() take.
  */
 
 import {
@@ -13,7 +15,9 @@ import {
   type Meta,
   type RuleViolationCode,
   type Store,
+  type Writes,
 } from './change';
+import { VERSION_LIMIT, oldestKeptVersion, type VersionFields } from './versions';
 
 /** Rule violations a To-Do change can report. */
 export type ViolationCode =
@@ -43,10 +47,11 @@ export const CHANGES = ['create', 'edit'] as const;
 export type ChangeKind = (typeof CHANGES)[number];
 
 /** One version of a To-Do: its data after a change, and what, when and who changed it. */
-export interface Entity extends EntityBase {
-  kind: 'todo';
-  change: ChangeKind;
-  changedFields: Field[];
+export interface Entity extends EntityBase, VersionFields<ChangeKind, Field> {
+  kind: 'todoVersion';
+  /** Derived from the To-Do and the version number: see versionId. */
+  id: string;
+  todoId: string;
   title: string;
   /** Empty when there are none. */
   notes: string;
@@ -65,7 +70,16 @@ export type Field = keyof Data;
  * actions (done, abandon, reopen), whichever side runs these rules. parseEdit enforces it.
  */
 export type Change =
-  { op: 'create'; id: string; fields: Data } | { op: 'edit'; id: string; fields: Partial<Data> };
+  | { op: 'create'; todoId: string; fields: Data }
+  | { op: 'edit'; todoId: string; fields: Partial<Data> };
+
+/**
+ * A version's id. Derived rather than random, so the rules stay pure and two devices
+ * writing the same version of a To-Do collide instead of both being kept.
+ */
+export function versionId(todoId: string, version: number): string {
+  return `${todoId}:${version}`;
+}
 
 export type TitleCheck = { ok: true; title: string } | { ok: false; message: string };
 
@@ -102,10 +116,10 @@ export function checkDueDate(input: unknown): Checked<string | null, ViolationCo
   return real ? { ok: true, value: input } : invalid;
 }
 
-/** Reads a create request for the To-Do `id`: a title, optional notes and an optional due date. */
+/** Reads a create request for the To-Do `todoId`: a title, optional notes and an optional due date. */
 export function parseCreate(
   input: unknown,
-  id: string,
+  todoId: string,
 ): Checked<Change & { op: 'create' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const title = checkTitle(input.title);
@@ -119,16 +133,16 @@ export function parseCreate(
     ok: true,
     value: {
       op: 'create',
-      id,
+      todoId,
       fields: { title: title.title, notes: notes.value, dueDate: dueDate.value, state: 'new' },
     },
   };
 }
 
-/** Reads an edit request for the To-Do `id`: any non-empty subset of title, notes and due date. */
+/** Reads an edit request for the To-Do `todoId`: any non-empty subset of title, notes and due date. */
 export function parseEdit(
   input: unknown,
-  id: string,
+  todoId: string,
 ): Checked<Change & { op: 'edit' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const fields: Partial<Data> = {};
@@ -150,7 +164,7 @@ export function parseEdit(
   if (Object.keys(fields).length === 0) {
     return violation('invalid_change', 'Change at least one of title, notes or dueDate.');
   }
-  return { ok: true, value: { op: 'edit', id, fields } };
+  return { ok: true, value: { op: 'edit', todoId, fields } };
 }
 
 /** What apply needs to know: the To-Do's newest version and, for a create, how many exist. */
@@ -159,61 +173,79 @@ export interface Context {
   count: number | null;
 }
 
+/** The newest version of a To-Do, or null if it does not exist. */
+export async function newest(store: Store<Entity>, todoId: string): Promise<Entity | null> {
+  const [version] = await store.find('todoVersion', {
+    where: { todoId },
+    orderBy: { field: 'version', desc: true },
+    limit: 1,
+  });
+  return version ?? null;
+}
+
 export async function load(store: Store<Entity>, change: Change): Promise<Context> {
   return {
-    current: await store.get('todo', change.id),
-    count: change.op === 'create' ? await store.count('todo') : null,
+    current: await newest(store, change.todoId),
+    count: change.op === 'create' ? await store.count('todoVersion', 'todoId') : null,
   };
 }
 
-/** Decides which versions a change appends. None means it changes nothing. */
+/**
+ * Decides what a change writes: the To-Do's next version, and the versions that fall
+ * past VERSION_LIMIT. Nothing means it changes nothing.
+ */
 export function apply(
   { current, count }: Context,
   change: Change,
   meta: Meta,
   now: number,
-): Checked<Entity[], ViolationCode> {
-  const stamp = {
-    kind: 'todo',
-    id: change.id,
-    change: change.op,
-    changedAt: now,
-    ...meta,
-  } as const;
+): Checked<Writes<Entity>, ViolationCode> {
   if (change.op === 'create') {
     if (current) return violation('already_exists', 'This To-Do already exists.');
     if ((count ?? 0) >= LIMIT) return violation('todo_limit_reached', 'This board is full.');
-    const changedFields = Object.keys(change.fields) as Field[];
-    return {
-      ok: true,
-      value: [{ ...stamp, version: 1, createdAt: now, changedFields, ...change.fields }],
-    };
+  } else if (!current) {
+    return violation('not_found', 'No such To-Do.');
   }
-  if (!current) return violation('not_found', 'No such To-Do.');
-  const changedFields = (Object.keys(change.fields) as Field[]).filter(
-    (field) => change.fields[field] !== current[field],
-  );
-  if (changedFields.length === 0) return { ok: true, value: [] };
-  return {
-    ok: true,
-    value: [
-      {
-        ...stamp,
-        version: current.version + 1,
-        createdAt: current.createdAt,
-        changedFields,
-        title: current.title,
-        notes: current.notes,
-        dueDate: current.dueDate,
-        state: current.state,
-        ...change.fields,
-      },
-    ],
+  const changedFields =
+    change.op === 'create'
+      ? (Object.keys(change.fields) as Field[])
+      : (Object.keys(change.fields) as Field[]).filter(
+          (field) => change.fields[field] !== current?.[field],
+        );
+  if (changedFields.length === 0) return { ok: true, value: { put: [], delete: [] } };
+
+  const version = (current?.version ?? 0) + 1;
+  const next: Entity = {
+    kind: 'todoVersion',
+    id: versionId(change.todoId, version),
+    todoId: change.todoId,
+    version,
+    createdAt: current?.createdAt ?? now,
+    change: change.op,
+    changedFields,
+    changedAt: now,
+    ...meta,
+    title: current?.title ?? '',
+    notes: current?.notes ?? '',
+    dueDate: current?.dueDate ?? null,
+    state: current?.state ?? 'new',
+    ...change.fields,
   };
+  const pruned =
+    version > VERSION_LIMIT
+      ? [
+          {
+            kind: 'todoVersion' as const,
+            where: { todoId: change.todoId },
+            before: { field: 'version' as const, value: oldestKeptVersion(version) },
+          },
+        ]
+      : [];
+  return { ok: true, value: { put: [next], delete: pruned } };
 }
 
 class TodoType extends EntityType<Entity, Change, ViolationCode, Context> {
-  readonly kind = 'todo';
+  readonly kind = 'todoVersion';
 
   load(store: Store<Entity>, change: Change): Promise<Context> {
     return load(store, change);
@@ -224,7 +256,7 @@ class TodoType extends EntityType<Entity, Change, ViolationCode, Context> {
     change: Change,
     meta: Meta,
     now: number,
-  ): Checked<Entity[], ViolationCode> {
+  ): Checked<Writes<Entity>, ViolationCode> {
     return apply(context, change, meta, now);
   }
 }

@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as Todos from './todo';
+import { VERSION_LIMIT } from './versions';
 
 const ID = '01JC0000000000000000000000';
 const data: Todos.Data = { title: 'Cut the lawn', notes: '', dueDate: null, state: 'new' };
 const meta = { actor: { kind: 'device', id: null }, deviceChangedAt: null } as const;
 const v1: Todos.Entity = {
-  kind: 'todo',
-  id: ID,
+  kind: 'todoVersion',
+  id: `${ID}:1`,
+  todoId: ID,
   version: 1,
   createdAt: 100,
   change: 'create',
@@ -22,7 +24,7 @@ describe('parseCreate', () => {
       ok: true,
       value: {
         op: 'create',
-        id: ID,
+        todoId: ID,
         fields: { title: 'Cut the lawn', notes: '', dueDate: null, state: 'new' },
       },
     });
@@ -44,7 +46,7 @@ describe('parseEdit', () => {
   it('keeps only the fields sent', () => {
     expect(Todos.parseEdit({ notes: ' Front only ', dueDate: null }, ID)).toEqual({
       ok: true,
-      value: { op: 'edit', id: ID, fields: { notes: 'Front only', dueDate: null } },
+      value: { op: 'edit', todoId: ID, fields: { notes: 'Front only', dueDate: null } },
     });
   });
 
@@ -78,14 +80,14 @@ describe('checkDueDate', () => {
 });
 
 describe('apply', () => {
-  const create = { op: 'create', id: ID, fields: data } as const;
+  const create = { op: 'create', todoId: ID, fields: data } as const;
 
   it('creates version 1 in state New, with every field changed', () => {
     const change = Todos.parseCreate({ title: 'Cut the lawn' }, ID);
     if (!change.ok) throw new Error(change.message);
     expect(Todos.apply({ current: null, count: 0 }, change.value, meta, 100)).toEqual({
       ok: true,
-      value: [v1],
+      value: { put: [v1], delete: [] },
     });
   });
 
@@ -98,7 +100,7 @@ describe('apply', () => {
       ok: false,
       code: 'todo_limit_reached',
     });
-    const edit = { op: 'edit', id: ID, fields: { title: 'x' } } as const;
+    const edit = { op: 'edit', todoId: ID, fields: { title: 'x' } } as const;
     expect(Todos.apply({ current: null, count: null }, edit, meta, 200)).toMatchObject({
       ok: false,
       code: 'not_found',
@@ -108,31 +110,49 @@ describe('apply', () => {
   it('appends the next version with only the fields whose value changed', () => {
     const edit = {
       op: 'edit',
-      id: ID,
+      todoId: ID,
       fields: { title: 'Cut the lawn', dueDate: '2026-11-30' },
     } as const;
     const device = { actor: { kind: 'device', id: ID }, deviceChangedAt: 150 } as const;
     expect(Todos.apply({ current: v1, count: null }, edit, device, 200)).toEqual({
       ok: true,
-      value: [
-        {
-          ...v1,
-          ...device,
-          version: 2,
-          change: 'edit',
-          changedFields: ['dueDate'],
-          changedAt: 200,
-          dueDate: '2026-11-30',
-        },
-      ],
+      value: {
+        put: [
+          {
+            ...v1,
+            ...device,
+            id: `${ID}:2`,
+            version: 2,
+            change: 'edit',
+            changedFields: ['dueDate'],
+            changedAt: 200,
+            dueDate: '2026-11-30',
+          },
+        ],
+        delete: [],
+      },
+    });
+  });
+
+  it('deletes the versions that fall past VERSION_LIMIT', () => {
+    const newest = { ...v1, id: `${ID}:${VERSION_LIMIT}`, version: VERSION_LIMIT };
+    const edit = { op: 'edit', todoId: ID, fields: { title: 'Still cutting' } } as const;
+    expect(Todos.apply({ current: newest, count: null }, edit, meta, 200)).toMatchObject({
+      ok: true,
+      value: {
+        put: [{ version: VERSION_LIMIT + 1 }],
+        delete: [
+          { kind: 'todoVersion', where: { todoId: ID }, before: { field: 'version', value: 2 } },
+        ],
+      },
     });
   });
 
   it('appends nothing when nothing changes', () => {
-    const edit = { op: 'edit', id: ID, fields: { notes: '' } } as const;
+    const edit = { op: 'edit', todoId: ID, fields: { notes: '' } } as const;
     expect(Todos.apply({ current: v1, count: null }, edit, meta, 200)).toEqual({
       ok: true,
-      value: [],
+      value: { put: [], delete: [] },
     });
   });
 });

@@ -8,5 +8,5 @@ import { todoVersions } from './db/schema';
  * and its entity differ.
  */
 export const mappings = mappingsFor<Entity>()({
-  todo: { table: todoVersions },
+  todoVersion: { table: todoVersions },
 });

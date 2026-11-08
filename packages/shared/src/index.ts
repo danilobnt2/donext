@@ -4,17 +4,20 @@ import type * as Todos from './todo';
 export * as Todos from './todo';
 export {
   EntityType,
-  VERSION_LIMIT,
-  oldestKeptVersion,
   parseDeviceMeta,
   write,
   type Actor,
   type Checked,
   type EntityBase,
+  type FieldOf,
+  type Filter,
   type Meta,
+  type Query,
   type RuleViolationCode,
   type Store,
+  type Writes,
 } from './change';
+export { VERSION_LIMIT, oldestKeptVersion, type VersionFields } from './versions';
 export {
   entities,
   type ChangeOf,
