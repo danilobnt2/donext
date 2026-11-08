@@ -29,6 +29,8 @@ pnpm screenshots   # retakes the README screenshots into e2e/screenshots/
 
 After changing `wrangler.jsonc`, run `pnpm --filter @donext/worker types` and commit `worker-configuration.d.ts`.
 
+After changing `apps/worker/src/db/schema.ts`, run `pnpm --filter @donext/worker db:generate` and commit the migration it writes to `apps/worker/drizzle/`. Never edit a migration that has shipped.
+
 ## Branching
 
 Trunk-based: `master` is the only long-lived branch and is always releasable. There is no `develop` branch.
@@ -51,4 +53,4 @@ Nothing is deployed by hand.
 4. The run waits for approval on the `production` GitHub environment.
 5. On approval, it applies D1 migrations, deploys the same artifact to production, [donext.orben.dev](https://donext.orben.dev), and smoke-tests it.
 
-`wrangler deploy` creates the Worker, its custom domain and its Durable Object namespace from `wrangler.jsonc`. Redeploying unchanged config is a no-op. Durable Object SQLite schemas are migrated in code (`apps/worker/src/schema.ts`) the first time each object starts after a deploy. D1 migrations run in the pipeline, before the code that needs them. Keep both backward compatible with the previous release.
+`wrangler deploy` creates the Worker, its custom domain and its Durable Object namespace from `wrangler.jsonc`. Redeploying unchanged config is a no-op. Durable Object SQLite schemas are defined with [Drizzle](https://orm.drizzle.team) in `apps/worker/src/db/schema.ts`; each object applies the migrations in `apps/worker/drizzle/` the first time it starts after a deploy. D1 migrations run in the pipeline, before the code that needs them. Keep both backward compatible with the previous release.

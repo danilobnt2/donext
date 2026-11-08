@@ -24,6 +24,14 @@ jobs:
         run: |
           pnpm --filter @donext/worker types
           git diff --exit-code -- apps/worker/worker-configuration.d.ts
+      - name: Database migrations match the schema
+        run: |
+          pnpm --filter @donext/worker db:generate
+          if [ -n "$(git status --porcelain -- apps/worker/drizzle)" ]; then
+            git status --short -- apps/worker/drizzle
+            echo "::error::src/db/schema.ts changed without a migration. Run pnpm --filter @donext/worker db:generate and commit apps/worker/drizzle."
+            exit 1
+          fi
       - run: pnpm typecheck
       - run: pnpm test
       # Builds the web assets and bundles the Worker with a dry-run deploy, which also

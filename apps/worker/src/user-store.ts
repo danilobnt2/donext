@@ -1,75 +1,55 @@
 import { DurableObject } from 'cloudflare:workers';
-import { Todos, write, type Checked, type Meta, type Todo, type TodoVersion } from '@donext/shared';
-import { migrate } from './schema';
-import { SqlStore } from './sql-store';
-import { todoBoard, todoTable } from './todo-table';
+import {
+  entities,
+  write,
+  type ChangeOf,
+  type Checked,
+  type CodeOf,
+  type Entity,
+  type EntityOf,
+  type Kind,
+} from '@donext/shared';
+import { openDb } from './db';
+import { DbStore } from './db-store';
+import { mappings } from './entities';
 
 /**
- * One user's data. Until sign-in exists, a single shared instance holds every To-Do.
- * The rules live in @donext/shared; this object only routes requests to them and to its
- * SQL storage.
+ * One user's data. Until sign-in exists, a single shared instance holds everything. It
+ * only routes: the kinds of entity and their rules live in @donext/shared, their tables in
+ * entities.ts.
  */
 export class UserStore extends DurableObject<Env> {
-  private readonly store: SqlStore<Todos.Version>;
+  private store!: DbStore<Entity>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
-    this.store = new SqlStore(ctx.storage, { todo: todoTable });
+    ctx.blockConcurrencyWhile(async () => {
+      this.store = new DbStore(await openDb(ctx.storage), mappings);
+    });
   }
 
-  /** To-Dos on the board, newest first. */
-  listTodos(): Todo[] {
-    return todoBoard(this.store).map(toTodo);
+  /** Every entity of a type, newest first. */
+  list<K extends Kind>(type: K): EntityOf<K>[] {
+    return this.store.list(type);
   }
 
-  /** Applies a change to a To-Do and returns the To-Do as it now stands. */
-  async writeTodo(change: Todos.Change, meta: Meta): Promise<Checked<Todo, Todos.ViolationCode>> {
-    const result = await write(Todos.kind, this.store, change, meta, Date.now());
+  /** Applies a change and returns the entity it targets as it now stands. */
+  async write<K extends Kind>(
+    type: K,
+    change: ChangeOf<K>,
+  ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
+    const result = await write(entities[type], this.store, change, Date.now());
     if (!result.ok) return result;
-    const todo =
-      result.value.find((version) => version.id === change.id) ??
-      this.store.newestSync('todo', change.id);
-    if (!todo) throw new Error(`To-Do ${change.id} vanished during its own write.`);
-    return { ok: true, value: toTodo(todo) };
-  }
-
-  /** Versions of a To-Do, newest first, older than `before` if given. Null if it does not exist. */
-  listTodoVersions(id: string, before: number | null, limit: number): TodoVersion[] | null {
-    if (!this.store.newestSync('todo', id)) return null;
-    return this.store
-      .versions('todo', id, before ?? Number.MAX_SAFE_INTEGER, limit)
-      .map(toApiVersion);
+    const entity = result.value.find((e) => e.kind === type && e.id === change.id);
+    if (!entity) throw new Error(`Writing ${type} ${change.id} did not produce it.`);
+    return { ok: true, value: entity as EntityOf<K> };
   }
 
   /**
-   * Deletes every To-Do with all its versions. Lets anyone clear the shared board of
-   * unwanted content until sign-in gives each user their own; remove it then.
+   * Deletes every entity of a type. Lets anyone clear the shared board of unwanted content
+   * until sign-in gives each user their own; remove it then.
    */
-  deleteAllTodos(): number {
-    return this.store.deleteAll('todo');
+  deleteAll(type: Kind): number {
+    return this.store.deleteAll(type);
   }
-}
-
-function toTodo(version: Todos.Version): Todo {
-  return {
-    id: version.id,
-    ...version.data,
-    version: version.version,
-    createdAt: new Date(version.createdAt).toISOString(),
-    updatedAt: new Date(version.changedAt).toISOString(),
-  };
-}
-
-function toApiVersion(version: Todos.Version): TodoVersion {
-  return {
-    version: version.version,
-    change: version.change,
-    changedFields: version.changedFields,
-    changedAt: new Date(version.changedAt).toISOString(),
-    deviceChangedAt:
-      version.deviceChangedAt === null ? null : new Date(version.deviceChangedAt).toISOString(),
-    actor: version.actor,
-    todo: version.data,
-  };
 }
