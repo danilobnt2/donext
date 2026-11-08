@@ -19,7 +19,7 @@ export class UserStore extends DurableObject<Env> {
   }
 
   listTodos(): Todo[] {
-    return this.store.todos().map(toTodo);
+    return this.store.list('todo').map(toTodo);
   }
 
   /** Applies a change to a To-Do and returns the To-Do as it now stands. */
@@ -36,7 +36,7 @@ export class UserStore extends DurableObject<Env> {
    * sign-in gives each user their own; remove it then.
    */
   deleteAllTodos(): number {
-    return this.store.deleteAllTodos();
+    return this.store.deleteAll('todo');
   }
 }
 
