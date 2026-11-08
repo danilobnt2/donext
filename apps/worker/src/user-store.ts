@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Todos, write, type Checked, type Todo } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
+import { todos } from './db/todos';
 
 /**
  * One user's data. Until sign-in exists, a single shared instance holds every To-Do.
@@ -9,12 +10,12 @@ import { DbStore } from './db-store';
  * storage.
  */
 export class UserStore extends DurableObject<Env> {
-  private store!: DbStore;
+  private store!: DbStore<Todos.Item>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.store = new DbStore(await openDb(ctx.storage));
+      this.store = new DbStore<Todos.Item>(await openDb(ctx.storage), { todo: todos });
     });
   }
 

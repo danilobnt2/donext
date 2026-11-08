@@ -1,91 +1,78 @@
-import type { Store, Todos } from '@donext/shared';
-import { and, count, desc, eq } from 'drizzle-orm';
+import type { ItemBase, Store } from '@donext/shared';
+import { and, count, desc, eq, type SQL } from 'drizzle-orm';
+import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { Db } from './db';
-import { workItems } from './db/schema';
 
-/** Every kind of work item the database holds. Tasks join when they arrive. */
-export type WorkItem = Todos.Item;
+/** How one type of entity maps to its table. */
+export interface Mapping<E extends ItemBase, T extends SQLiteTable = SQLiteTable> {
+  table: T;
+  id: SQLiteColumn;
+  /** Narrows a table that holds several types of entity to this one. */
+  scope?: SQL;
+  toRow(entity: E): T['$inferInsert'];
+  fromRow(row: T['$inferSelect']): E;
+}
 
-type Type = WorkItem['kind'];
-type Row = typeof workItems.$inferSelect;
+/** One Mapping per type of entity the store holds. */
+export type Mappings<E extends ItemBase> = {
+  [K in E['kind']]: Mapping<Extract<E, { kind: K }>, SQLiteTable>;
+};
 
 /**
- * The Durable Object's Store, on the `work_items` table, for every type of work item.
- * Its queries run synchronously and never wait on I/O, so no other request runs between
- * a write's load and its commit.
+ * The Durable Object's Store, on its Drizzle database, for whatever entities it is given
+ * a Mapping for. Its queries run synchronously and never wait on I/O, so no other request
+ * runs between a write's load and its commit.
  */
-export class DbStore implements Store<WorkItem> {
-  constructor(private readonly db: Db) {}
+export class DbStore<E extends ItemBase> implements Store<E> {
+  constructor(
+    private readonly db: Db,
+    private readonly mappings: Mappings<E>,
+  ) {}
 
-  async get<K extends Type>(type: K, id: string): Promise<Extract<WorkItem, { kind: K }> | null> {
+  async get<K extends E['kind']>(type: K, id: string): Promise<Extract<E, { kind: K }> | null> {
+    const m = this.mapping(type);
     const row = this.db
       .select()
-      .from(workItems)
-      .where(and(eq(workItems.type, type), eq(workItems.id, id)))
+      .from(m.table)
+      .where(and(eq(m.id, id), m.scope))
       .get();
-    return row ? (fromRow(row) as Extract<WorkItem, { kind: K }>) : null;
+    return row ? m.fromRow(row) : null;
   }
 
-  async count(type: Type): Promise<number> {
-    return (
-      this.db.select({ count: count() }).from(workItems).where(eq(workItems.type, type)).get()
-        ?.count ?? 0
-    );
+  async count(type: E['kind']): Promise<number> {
+    const m = this.mapping(type);
+    return this.db.select({ count: count() }).from(m.table).where(m.scope).get()?.count ?? 0;
   }
 
-  async commit(items: WorkItem[]): Promise<void> {
+  async commit(entities: E[]): Promise<void> {
     this.db.transaction((tx) => {
-      for (const item of items) {
-        const row = toRow(item);
-        tx.insert(workItems)
-          .values(row)
-          .onConflictDoUpdate({ target: workItems.id, set: row })
-          .run();
+      for (const entity of entities) {
+        const m = this.mapping(entity.kind) as Mapping<E>;
+        const row = m.toRow(entity);
+        tx.insert(m.table).values(row).onConflictDoUpdate({ target: m.id, set: row }).run();
       }
     });
   }
 
-  /** Every work item of a type, newest first. */
-  list<K extends Type>(type: K): Extract<WorkItem, { kind: K }>[] {
+  /** Every entity of a type, newest id first. */
+  list<K extends E['kind']>(type: K): Extract<E, { kind: K }>[] {
+    const m = this.mapping(type);
     return this.db
       .select()
-      .from(workItems)
-      .where(eq(workItems.type, type))
-      .orderBy(desc(workItems.id))
+      .from(m.table)
+      .where(m.scope)
+      .orderBy(desc(m.id))
       .all()
-      .map((row) => fromRow(row) as Extract<WorkItem, { kind: K }>);
+      .map((row) => m.fromRow(row));
   }
 
-  /** Deletes every work item of a type and returns how many there were. */
-  deleteAll(type: Type): number {
-    return this.db
-      .delete(workItems)
-      .where(eq(workItems.type, type))
-      .returning({ id: workItems.id })
-      .all().length;
+  /** Deletes every entity of a type and returns how many there were. */
+  deleteAll(type: E['kind']): number {
+    const m = this.mapping(type);
+    return this.db.delete(m.table).where(m.scope).returning().all().length;
   }
-}
 
-function toRow(item: WorkItem): Row {
-  return {
-    id: item.id,
-    type: item.kind,
-    title: item.title,
-    state: item.state,
-    rev: item.rev,
-    createdAt: new Date(item.createdAt).toISOString(),
-    updatedAt: new Date(item.updatedAt).toISOString(),
-  };
-}
-
-function fromRow(row: Row): WorkItem {
-  return {
-    kind: row.type,
-    id: row.id,
-    title: row.title,
-    state: row.state,
-    rev: row.rev,
-    createdAt: Date.parse(row.createdAt),
-    updatedAt: Date.parse(row.updatedAt),
-  } as WorkItem;
+  private mapping<K extends E['kind']>(type: K): Mapping<Extract<E, { kind: K }>> {
+    return this.mappings[type];
+  }
 }
