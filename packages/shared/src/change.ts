@@ -9,11 +9,12 @@ export type Actor =
   | { kind: 'system'; id: null }
   | { kind: 'connector'; id: string };
 
-export type RuleViolationCode =
-  'invalid_title' | 'invalid_notes' | 'invalid_due_date' | 'invalid_change' | 'invalid_device';
+/** Rule violations any kind of item can report. Each kind adds its own codes. */
+export type RuleViolationCode = 'invalid_change' | 'invalid_device';
 
-export type Checked<T> =
-  { ok: true; value: T } | { ok: false; code: RuleViolationCode; message: string };
+/** A parsed value, or the rule it broke. `Code` is the codes the parser may report. */
+export type Checked<T, Code extends string = RuleViolationCode> =
+  { ok: true; value: T } | { ok: false; code: Code; message: string };
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -50,9 +51,9 @@ export function isObject(input: unknown): input is Record<string, unknown> {
   return input !== null && typeof input === 'object' && !Array.isArray(input);
 }
 
-export function violation(
-  code: RuleViolationCode,
+export function violation<Code extends string>(
+  code: Code,
   message: string,
-): { ok: false; code: RuleViolationCode; message: string } {
+): { ok: false; code: Code; message: string } {
   return { ok: false, code, message };
 }

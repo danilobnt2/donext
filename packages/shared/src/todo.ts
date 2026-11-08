@@ -3,7 +3,11 @@
  * server enforces them and devices can reuse them. Import it as the `Todos` namespace.
  */
 
-import { isObject, violation, type Checked } from './change';
+import { isObject, violation, type Checked, type RuleViolationCode } from './change';
+
+/** Rule violations a To-Do change can report. */
+export type ViolationCode =
+  RuleViolationCode | 'invalid_title' | 'invalid_notes' | 'invalid_due_date';
 
 /** Longest To-Do title accepted, in characters (Unicode code points). */
 export const TITLE_MAX_LENGTH = 500;
@@ -53,7 +57,7 @@ export function checkTitle(input: unknown): TitleCheck {
 }
 
 /** Trims the notes and checks they are within NOTES_MAX_LENGTH. */
-export function checkNotes(input: unknown): Checked<string> {
+export function checkNotes(input: unknown): Checked<string, ViolationCode> {
   if (typeof input !== 'string') return violation('invalid_notes', 'Notes must be text.');
   const notes = input.trim();
   if ([...notes].length > NOTES_MAX_LENGTH) {
@@ -63,7 +67,7 @@ export function checkNotes(input: unknown): Checked<string> {
 }
 
 /** Accepts null (no due date) or a real calendar date written YYYY-MM-DD. */
-export function checkDueDate(input: unknown): Checked<string | null> {
+export function checkDueDate(input: unknown): Checked<string | null, ViolationCode> {
   if (input === null) return { ok: true, value: null };
   const invalid = violation('invalid_due_date', 'Due date must be a date as YYYY-MM-DD, or null.');
   if (typeof input !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input)) return invalid;
@@ -75,7 +79,7 @@ export function checkDueDate(input: unknown): Checked<string | null> {
 }
 
 /** Reads a create request: a title, optional notes and an optional due date. */
-export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }> {
+export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const title = checkTitle(input.title);
   if (!title.ok) return violation('invalid_title', title.message);
@@ -94,7 +98,7 @@ export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }
 }
 
 /** Reads an edit request: any non-empty subset of title, notes and due date. */
-export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }> {
+export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const fields: Partial<Data> = {};
   if ('title' in input) {

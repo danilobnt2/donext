@@ -1,4 +1,4 @@
-import type { Actor, RuleViolationCode } from './change';
+import type { Actor } from './change';
 import type * as Todos from './todo';
 
 export * as Todos from './todo';
@@ -49,7 +49,7 @@ export interface EditTodoRequest extends DeviceMeta {
 }
 
 export type ApiErrorCode =
-  | RuleViolationCode
+  | Todos.ViolationCode
   | 'invalid_json'
   | 'invalid_cursor'
   | 'payload_too_large'
