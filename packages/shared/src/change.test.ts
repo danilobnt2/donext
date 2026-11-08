@@ -2,22 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { write, type Kind, type Store } from './change';
 import * as Todos from './todo';
 
-/** The simplest Store: items in memory. */
-class MemoryStore implements Store<Todos.Item> {
-  items = new Map<string, Todos.Item>();
-  commits: Todos.Item[][] = [];
+/** The simplest Store: entities in memory. */
+class MemoryStore implements Store<Todos.Entity> {
+  entities = new Map<string, Todos.Entity>();
+  commits: Todos.Entity[][] = [];
 
   async get<K extends 'todo'>(_kind: K, id: string) {
-    return (this.items.get(id) ?? null) as Extract<Todos.Item, { kind: K }> | null;
+    return (this.entities.get(id) ?? null) as Extract<Todos.Entity, { kind: K }> | null;
   }
 
   async count() {
-    return this.items.size;
+    return this.entities.size;
   }
 
-  async commit(items: Todos.Item[]) {
-    this.commits.push(items);
-    for (const item of items) this.items.set(item.id, item);
+  async commit(entities: Todos.Entity[]) {
+    this.commits.push(entities);
+    for (const entity of entities) this.entities.set(entity.id, entity);
   }
 }
 
@@ -25,7 +25,7 @@ const A = '01JC000000000000000000000A';
 const B = '01JC000000000000000000000B';
 
 describe('write', () => {
-  it('commits the items a change produces', async () => {
+  it('commits the entities a change produces', async () => {
     const store = new MemoryStore();
     const create = Todos.parseCreate({ title: 'Cut the lawn' }, A);
     if (!create.ok) throw new Error(create.message);
@@ -41,10 +41,10 @@ describe('write', () => {
     expect(store.commits).toHaveLength(1);
   });
 
-  it('commits every item a change touches together', async () => {
+  it('commits every entity a change touches together', async () => {
     const store = new MemoryStore();
-    // A change that touches two items, as completing a Task will touch its To-Do.
-    const both: Kind<Todos.Item, null, never, null> = {
+    // A change that touches two entities, as completing a Task will touch its To-Do.
+    const both: Kind<Todos.Entity, null, never, null> = {
       load: async () => null,
       apply: (_context, _change, now) => ({
         ok: true,

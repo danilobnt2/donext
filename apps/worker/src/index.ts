@@ -62,7 +62,7 @@ async function createTodo(
 }
 
 /** A To-Do as the API returns it. */
-function toTodo(todo: Todos.Item): Todo {
+function toTodo(todo: Todos.Entity): Todo {
   return {
     id: todo.id,
     title: todo.title,

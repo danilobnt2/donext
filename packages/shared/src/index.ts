@@ -4,7 +4,7 @@ export * as Todos from './todo';
 export {
   write,
   type Checked,
-  type ItemBase,
+  type EntityBase,
   type Kind,
   type RuleViolationCode,
   type Store,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as Todos from './todo';
 
 const ID = '01JC0000000000000000000000';
-const item: Todos.Item = {
+const todo: Todos.Entity = {
   kind: 'todo',
   id: ID,
   title: 'Cut the lawn',
@@ -54,12 +54,12 @@ describe('apply', () => {
   it('creates a To-Do in state New, at revision 1', () => {
     expect(Todos.apply({ current: null, count: 0 }, create, 100)).toEqual({
       ok: true,
-      value: [item],
+      value: [todo],
     });
   });
 
   it('refuses to create a To-Do twice or past LIMIT', () => {
-    expect(Todos.apply({ current: item, count: 1 }, create, 200)).toMatchObject({
+    expect(Todos.apply({ current: todo, count: 1 }, create, 200)).toMatchObject({
       ok: false,
       code: 'already_exists',
     });

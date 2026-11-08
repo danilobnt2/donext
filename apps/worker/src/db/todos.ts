@@ -4,7 +4,7 @@ import type { Mapping } from '../db-store';
 import { workItems } from './schema';
 
 /** To-Dos are the rows of `work_items` whose type is 'todo'. */
-export const todos: Mapping<Todos.Item, typeof workItems> = {
+export const todos: Mapping<Todos.Entity, typeof workItems> = {
   table: workItems,
   id: workItems.id,
   scope: eq(workItems.type, 'todo'),

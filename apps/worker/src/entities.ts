@@ -7,7 +7,7 @@ import { todos } from './db/todos';
  * and the rule violations they can report. Tasks join here when they arrive.
  */
 export interface EntityTypes {
-  todo: { entity: Todos.Item; change: Todos.Change; code: Todos.ViolationCode };
+  todo: { entity: Todos.Entity; change: Todos.Change; code: Todos.ViolationCode };
 }
 
 export type Type = keyof EntityTypes;

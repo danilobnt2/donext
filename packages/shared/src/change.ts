@@ -1,53 +1,53 @@
 /**
- * What every change has in common, whatever kind of item it touches: how a broken rule
+ * What every change has in common, whatever kind of entity it touches: how a broken rule
  * is reported, and how a change is written. Each kind (To-Dos now, Tasks later) supplies
  * its rules as a Kind; each platform (the Durable Object now, devices later) supplies its
  * storage as a Store; write() joins the two.
  */
 
-/** Rule violations any kind of item can report. Each kind adds its own codes. */
+/** Rule violations any kind of entity can report. Each kind adds its own codes. */
 export type RuleViolationCode = 'invalid_change';
 
 /** A parsed value, or the rule it broke. `Code` is the codes that may be reported. */
 export type Checked<T, Code extends string = RuleViolationCode> =
   { ok: true; value: T } | { ok: false; code: Code; message: string };
 
-/** What every stored item has, whatever its kind. */
-export interface ItemBase {
-  /** The kind of item, such as 'todo'. */
+/** What every stored entity has, whatever its kind. */
+export interface EntityBase {
+  /** The kind of entity, such as 'todo'. */
   kind: string;
   id: string;
 }
 
 /**
- * Storage for items, implemented once per platform. Between write()'s load and its
+ * Storage for entities, implemented once per platform. Between write()'s load and its
  * commit no other write may run; each Store guarantees it.
  */
-export interface Store<I extends ItemBase> {
-  get<K extends I['kind']>(kind: K, id: string): Promise<Extract<I, { kind: K }> | null>;
-  count(kind: I['kind']): Promise<number>;
-  /** Writes every item as given, all or nothing. */
-  commit(items: I[]): Promise<void>;
+export interface Store<E extends EntityBase> {
+  get<K extends E['kind']>(kind: K, id: string): Promise<Extract<E, { kind: K }> | null>;
+  count(kind: E['kind']): Promise<number>;
+  /** Writes every entity as given, all or nothing. */
+  commit(entities: E[]): Promise<void>;
 }
 
 /**
  * The rules for one kind of change. load reads what the rules need; apply decides, as a
- * pure function, which items to write. A change can touch several items, of any kind;
- * no items means nothing changed.
+ * pure function, which entities to write. A change can touch several entities, of
+ * any kind; none means nothing changed.
  */
-export interface Kind<I extends ItemBase, C, Code extends string, Context> {
-  load(store: Store<I>, change: C): Promise<Context>;
+export interface Kind<E extends EntityBase, C, Code extends string, Context> {
+  load(store: Store<E>, change: C): Promise<Context>;
   /** `now` is the clock of whoever runs the rules, in Unix milliseconds. */
-  apply(context: Context, change: C, now: number): Checked<I[], Code>;
+  apply(context: Context, change: C, now: number): Checked<E[], Code>;
 }
 
-/** Applies a change and commits the items it produces. */
-export async function write<I extends ItemBase, C, Code extends string, Context>(
-  kind: Kind<I, C, Code, Context>,
-  store: Store<I>,
+/** Applies a change and commits the entities it produces. */
+export async function write<E extends EntityBase, C, Code extends string, Context>(
+  kind: Kind<E, C, Code, Context>,
+  store: Store<E>,
   change: C,
   now: number,
-): Promise<Checked<I[], Code>> {
+): Promise<Checked<E[], Code>> {
   const result = kind.apply(await kind.load(store, change), change, now);
   if (result.ok && result.value.length > 0) await store.commit(result.value);
   return result;

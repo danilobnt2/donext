@@ -1,10 +1,10 @@
-import type { ItemBase, Store } from '@donext/shared';
+import type { EntityBase, Store } from '@donext/shared';
 import { and, count, desc, eq, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { Db } from './db';
 
 /** How one type of entity maps to its table. */
-export interface Mapping<E extends ItemBase, T extends SQLiteTable = SQLiteTable> {
+export interface Mapping<E extends EntityBase, T extends SQLiteTable = SQLiteTable> {
   table: T;
   id: SQLiteColumn;
   /** Narrows a table that holds several types of entity to this one. */
@@ -14,7 +14,7 @@ export interface Mapping<E extends ItemBase, T extends SQLiteTable = SQLiteTable
 }
 
 /** One Mapping per type of entity the store holds. */
-export type Mappings<E extends ItemBase> = {
+export type Mappings<E extends EntityBase> = {
   [K in E['kind']]: Mapping<Extract<E, { kind: K }>, SQLiteTable>;
 };
 
@@ -23,7 +23,7 @@ export type Mappings<E extends ItemBase> = {
  * a Mapping for. Its queries run synchronously and never wait on I/O, so no other request
  * runs between a write's load and its commit.
  */
-export class DbStore<E extends ItemBase> implements Store<E> {
+export class DbStore<E extends EntityBase> implements Store<E> {
   constructor(
     private readonly db: Db,
     private readonly mappings: Mappings<E>,

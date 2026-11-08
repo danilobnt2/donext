@@ -8,7 +8,7 @@ import {
   isObject,
   violation,
   type Checked,
-  type ItemBase,
+  type EntityBase,
   type Kind,
   type RuleViolationCode,
   type Store,
@@ -27,7 +27,7 @@ export const LIMIT = 10_000;
 export type State = 'new' | 'active' | 'pending' | 'done';
 
 /** A To-Do as it is stored. Times are Unix milliseconds. */
-export interface Item extends ItemBase {
+export interface Entity extends EntityBase {
   kind: 'todo';
   title: string;
   state: State;
@@ -62,20 +62,20 @@ export function parseCreate(input: unknown, id: string): Checked<Change, Violati
 
 /** What apply needs to know: the To-Do as stored, and how many exist. */
 export interface Context {
-  current: Item | null;
+  current: Entity | null;
   count: number;
 }
 
-export async function load(store: Store<Item>, change: Change): Promise<Context> {
+export async function load(store: Store<Entity>, change: Change): Promise<Context> {
   return { current: await store.get('todo', change.id), count: await store.count('todo') };
 }
 
-/** Decides which items a change writes. */
+/** Decides which entities a change writes. */
 export function apply(
   { current, count }: Context,
   change: Change,
   now: number,
-): Checked<Item[], ViolationCode> {
+): Checked<Entity[], ViolationCode> {
   if (current) return violation('already_exists', 'This To-Do already exists.');
   if (count >= LIMIT) return violation('todo_limit_reached', 'This board is full.');
   return {
@@ -94,4 +94,4 @@ export function apply(
   };
 }
 
-export const kind: Kind<Item, Change, ViolationCode, Context> = { load, apply };
+export const kind: Kind<Entity, Change, ViolationCode, Context> = { load, apply };
