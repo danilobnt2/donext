@@ -2,7 +2,19 @@ import type { Actor } from './change';
 import type * as Todos from './todo';
 
 export * as Todos from './todo';
-export { parseDeviceMeta, type Actor, type Checked, type RuleViolationCode } from './change';
+export {
+  VERSION_LIMIT,
+  parseDeviceMeta,
+  write,
+  type Actor,
+  type Checked,
+  type Commit,
+  type Kind,
+  type Meta,
+  type RuleViolationCode,
+  type Store,
+  type VersionBase,
+} from './change';
 
 /** A To-Do as the API returns it: the data of its newest version. */
 export interface Todo {
@@ -49,12 +61,7 @@ export interface EditTodoRequest extends DeviceMeta {
 }
 
 export type ApiErrorCode =
-  | Todos.ViolationCode
-  | 'invalid_json'
-  | 'invalid_cursor'
-  | 'payload_too_large'
-  | 'todo_limit_reached'
-  | 'not_found';
+  Todos.ViolationCode | 'invalid_json' | 'invalid_cursor' | 'payload_too_large' | 'not_found';
 
 export interface ApiError {
   error: { code: ApiErrorCode; message: string };

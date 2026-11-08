@@ -1,4 +1,5 @@
 import { Todos, parseDeviceMeta, type ApiError, type ApiErrorCode } from '@donext/shared';
+import { ulid } from 'ulid';
 import type { UserStore } from './user-store';
 
 export { UserStore } from './user-store';
@@ -12,7 +13,14 @@ const VERSIONS_PAGE_SIZE = 100;
 const TODO_PATH = /^\/api\/v1\/todos\/([0-9A-HJKMNP-TV-Z]{26})$/;
 const VERSIONS_PATH = /^\/api\/v1\/todos\/([0-9A-HJKMNP-TV-Z]{26})\/versions$/;
 
-type Store = DurableObjectStub<UserStore>;
+type UserStub = DurableObjectStub<UserStore>;
+
+/** HTTP status for each rule a change can break; any other code is a 400. */
+const STATUS: Partial<Record<ApiErrorCode, number>> = {
+  not_found: 404,
+  already_exists: 409,
+  todo_limit_reached: 409,
+};
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -49,33 +57,34 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function createTodo(request: Request, store: Store): Promise<Response> {
+async function createTodo(request: Request, store: UserStub): Promise<Response> {
   const body = await readJson(request);
   if (body instanceof Response) return body;
-  const change = Todos.parseCreate(body);
-  if (!change.ok) return apiError(400, change.code, change.message);
+  // Devices will send their own ids once they create To-Dos offline.
+  const change = Todos.parseCreate(body, ulid());
+  if (!change.ok) return ruleError(change);
   const meta = parseDeviceMeta(body);
-  if (!meta.ok) return apiError(400, meta.code, meta.message);
+  if (!meta.ok) return ruleError(meta);
 
-  const result = await store.createTodo(change.value, meta.value);
-  if (!result.ok) return apiError(409, 'todo_limit_reached', 'This board is full.');
-  return Response.json({ todo: result.todo }, { status: 201 });
+  const result = await store.writeTodo(change.value, meta.value);
+  if (!result.ok) return ruleError(result);
+  return Response.json({ todo: result.value }, { status: 201 });
 }
 
-async function editTodo(request: Request, store: Store, id: string): Promise<Response> {
+async function editTodo(request: Request, store: UserStub, id: string): Promise<Response> {
   const body = await readJson(request);
   if (body instanceof Response) return body;
-  const change = Todos.parseEdit(body);
-  if (!change.ok) return apiError(400, change.code, change.message);
+  const change = Todos.parseEdit(body, id);
+  if (!change.ok) return ruleError(change);
   const meta = parseDeviceMeta(body);
-  if (!meta.ok) return apiError(400, meta.code, meta.message);
+  if (!meta.ok) return ruleError(meta);
 
-  const result = await store.editTodo(id, change.value, meta.value);
-  if (!result.ok) return apiError(404, 'not_found', 'No such To-Do.');
-  return Response.json({ todo: result.todo });
+  const result = await store.writeTodo(change.value, meta.value);
+  if (!result.ok) return ruleError(result);
+  return Response.json({ todo: result.value });
 }
 
-async function listVersions(url: URL, store: Store, id: string): Promise<Response> {
+async function listVersions(url: URL, store: UserStub, id: string): Promise<Response> {
   const beforeParam = url.searchParams.get('before');
   const before = beforeParam === null ? null : Number(beforeParam);
   if (before !== null && !(Number.isSafeInteger(before) && before >= 1)) {
@@ -99,6 +108,10 @@ async function readJson(request: Request): Promise<unknown> {
   } catch {
     return apiError(400, 'invalid_json', 'Body must be JSON.');
   }
+}
+
+function ruleError(broken: { code: ApiErrorCode; message: string }): Response {
+  return apiError(STATUS[broken.code] ?? 400, broken.code, broken.message);
 }
 
 function methodNotAllowed(allow: string): Response {

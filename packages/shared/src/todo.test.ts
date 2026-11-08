@@ -1,14 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import * as Todos from './todo';
 
+const ID = '01JC0000000000000000000000';
 const todo: Todos.Data = { title: 'Cut the lawn', notes: '', dueDate: null, state: 'new' };
+const meta = { actor: { kind: 'device', id: null }, deviceChangedAt: null } as const;
+const v1: Todos.Version = {
+  kind: 'todo',
+  id: ID,
+  version: 1,
+  createdAt: 100,
+  change: 'create',
+  changedFields: ['title', 'notes', 'dueDate', 'state'],
+  changedAt: 100,
+  ...meta,
+  data: todo,
+};
 
 describe('parseCreate', () => {
   it('defaults notes to empty and the due date to none', () => {
-    expect(Todos.parseCreate({ title: ' Cut the lawn ' })).toEqual({
+    expect(Todos.parseCreate({ title: ' Cut the lawn ' }, ID)).toEqual({
       ok: true,
       value: {
-        kind: 'create',
+        op: 'create',
+        id: ID,
         fields: { title: 'Cut the lawn', notes: '', dueDate: null, state: 'new' },
       },
     });
@@ -22,28 +36,34 @@ describe('parseCreate', () => {
     [{ title: 'x', notes: 'n'.repeat(Todos.NOTES_MAX_LENGTH + 1) }, 'invalid_notes'],
     [{ title: 'x', dueDate: '2026-13-01' }, 'invalid_due_date'],
   ])('rejects %j with %s', (input, code) => {
-    expect(Todos.parseCreate(input)).toMatchObject({ ok: false, code });
+    expect(Todos.parseCreate(input, ID)).toMatchObject({ ok: false, code });
   });
 });
 
 describe('parseEdit', () => {
   it('keeps only the fields sent', () => {
-    expect(Todos.parseEdit({ notes: ' Front only ', dueDate: null })).toEqual({
+    expect(Todos.parseEdit({ notes: ' Front only ', dueDate: null }, ID)).toEqual({
       ok: true,
-      value: { kind: 'edit', fields: { notes: 'Front only', dueDate: null } },
+      value: { op: 'edit', id: ID, fields: { notes: 'Front only', dueDate: null } },
     });
   });
 
   it('rejects an edit with no fields', () => {
-    expect(Todos.parseEdit({ deviceId: 'x' })).toMatchObject({ ok: false, code: 'invalid_change' });
+    expect(Todos.parseEdit({ deviceId: 'x' }, ID)).toMatchObject({
+      ok: false,
+      code: 'invalid_change',
+    });
   });
 
   it('rejects state: it is not an editable field', () => {
-    expect(Todos.parseEdit({ state: 'done' })).toMatchObject({ ok: false, code: 'invalid_change' });
+    expect(Todos.parseEdit({ state: 'done' }, ID)).toMatchObject({
+      ok: false,
+      code: 'invalid_change',
+    });
   });
 
   it('rejects a blank title', () => {
-    expect(Todos.parseEdit({ title: ' ' })).toMatchObject({ ok: false, code: 'invalid_title' });
+    expect(Todos.parseEdit({ title: ' ' }, ID)).toMatchObject({ ok: false, code: 'invalid_title' });
   });
 });
 
@@ -57,45 +77,63 @@ describe('checkDueDate', () => {
   });
 });
 
-describe('applyChange', () => {
-  it('creates a To-Do in state New, with every field changed', () => {
-    const change = Todos.parseCreate({ title: 'Cut the lawn' });
+describe('apply', () => {
+  const create = { op: 'create', id: ID, fields: todo } as const;
+
+  it('creates version 1 in state New, with every field changed', () => {
+    const change = Todos.parseCreate({ title: 'Cut the lawn' }, ID);
     if (!change.ok) throw new Error(change.message);
-    expect(Todos.applyChange(null, change.value)).toEqual({
+    expect(Todos.apply({ current: null, count: 0 }, change.value, meta, 100)).toEqual({
       ok: true,
-      data: todo,
-      changedFields: ['title', 'notes', 'dueDate', 'state'],
+      value: [v1],
     });
   });
 
-  it('refuses to create a To-Do twice or edit a missing one', () => {
-    const create = { kind: 'create', fields: todo } as const;
-    expect(Todos.applyChange(todo, create)).toMatchObject({ ok: false, code: 'already_exists' });
-    const edit = { kind: 'edit', fields: { title: 'x' } } as const;
-    expect(Todos.applyChange(null, edit)).toMatchObject({ ok: false, code: 'not_found' });
+  it('refuses to create a To-Do twice, past LIMIT, or edit a missing one', () => {
+    expect(Todos.apply({ current: v1, count: 1 }, create, meta, 200)).toMatchObject({
+      ok: false,
+      code: 'already_exists',
+    });
+    expect(Todos.apply({ current: null, count: Todos.LIMIT }, create, meta, 200)).toMatchObject({
+      ok: false,
+      code: 'todo_limit_reached',
+    });
+    const edit = { op: 'edit', id: ID, fields: { title: 'x' } } as const;
+    expect(Todos.apply({ current: null, count: null }, edit, meta, 200)).toMatchObject({
+      ok: false,
+      code: 'not_found',
+    });
   });
 
-  it('reports only the fields whose value changed', () => {
+  it('appends the next version with only the fields whose value changed', () => {
     const edit = {
-      kind: 'edit',
+      op: 'edit',
+      id: ID,
       fields: { title: 'Cut the lawn', dueDate: '2026-11-30' },
     } as const;
-    expect(Todos.applyChange(todo, edit)).toEqual({
+    const device = { actor: { kind: 'device', id: ID }, deviceChangedAt: 150 } as const;
+    expect(Todos.apply({ current: v1, count: null }, edit, device, 200)).toEqual({
       ok: true,
-      data: { ...todo, dueDate: '2026-11-30' },
-      changedFields: ['dueDate'],
-    });
-    expect(Todos.applyChange(todo, { kind: 'edit', fields: { notes: '' } })).toMatchObject({
-      changedFields: [],
+      value: [
+        {
+          ...v1,
+          ...device,
+          version: 2,
+          change: 'edit',
+          changedFields: ['dueDate'],
+          changedAt: 200,
+          data: { ...todo, dueDate: '2026-11-30' },
+        },
+      ],
     });
   });
-});
 
-describe('oldestKeptVersion', () => {
-  it('keeps the newest Todos.VERSION_LIMIT versions', () => {
-    expect(Todos.oldestKeptVersion(1)).toBe(1);
-    expect(Todos.oldestKeptVersion(Todos.VERSION_LIMIT)).toBe(1);
-    expect(Todos.oldestKeptVersion(Todos.VERSION_LIMIT + 1)).toBe(2);
+  it('appends nothing when nothing changes', () => {
+    const edit = { op: 'edit', id: ID, fields: { notes: '' } } as const;
+    expect(Todos.apply({ current: v1, count: null }, edit, meta, 200)).toEqual({
+      ok: true,
+      value: [],
+    });
   });
 });
 

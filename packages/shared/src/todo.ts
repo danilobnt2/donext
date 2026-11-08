@@ -1,13 +1,29 @@
 /**
- * Rules for creating and changing To-Dos. Pure functions with no platform APIs, so the
- * server enforces them and devices can reuse them. Import it as the `Todos` namespace.
+ * Rules for creating and changing To-Dos: pure functions with no platform APIs, so every
+ * platform that holds the user's data runs the same ones. Import it as the `Todos`
+ * namespace; `kind` is what write() takes.
  */
 
-import { isObject, violation, type Checked, type RuleViolationCode } from './change';
+import {
+  isObject,
+  violation,
+  type Checked,
+  type Kind,
+  type Meta,
+  type RuleViolationCode,
+  type Store,
+  type VersionBase,
+} from './change';
 
 /** Rule violations a To-Do change can report. */
 export type ViolationCode =
-  RuleViolationCode | 'invalid_title' | 'invalid_notes' | 'invalid_due_date';
+  | RuleViolationCode
+  | 'invalid_title'
+  | 'invalid_notes'
+  | 'invalid_due_date'
+  | 'not_found'
+  | 'already_exists'
+  | 'todo_limit_reached';
 
 /** Longest To-Do title accepted, in characters (Unicode code points). */
 export const TITLE_MAX_LENGTH = 500;
@@ -15,11 +31,8 @@ export const TITLE_MAX_LENGTH = 500;
 /** Longest To-Do notes accepted, in characters (Unicode code points). */
 export const NOTES_MAX_LENGTH = 2000;
 
-/** Most To-Dos one board can hold. Becomes the per-user limit once sign-in exists. */
+/** Most To-Dos one board can hold, in any state. Becomes the per-user limit once sign-in exists. */
 export const LIMIT = 10_000;
-
-/** Versions kept per To-Do. Older ones are dropped first; the newest is always kept. */
-export const VERSION_LIMIT = 1000;
 
 export type State = 'new' | 'active' | 'pending' | 'done';
 
@@ -39,9 +52,18 @@ export type Field = keyof Data;
  * An edit never carries state: state follows from a To-Do's Tasks or from explicit
  * actions (done, abandon, reopen), whichever side runs these rules. parseEdit enforces it.
  */
-export type Change = { kind: 'create'; fields: Data } | { kind: 'edit'; fields: Partial<Data> };
+export type Change =
+  { op: 'create'; id: string; fields: Data } | { op: 'edit'; id: string; fields: Partial<Data> };
 
-export type ChangeKind = Change['kind'];
+export type ChangeKind = Change['op'];
+
+/** One version of a To-Do: its data after a change, and what, when and who changed it. */
+export interface Version extends VersionBase {
+  kind: 'todo';
+  change: ChangeKind;
+  changedFields: Field[];
+  data: Data;
+}
 
 export type TitleCheck = { ok: true; title: string } | { ok: false; message: string };
 
@@ -78,8 +100,11 @@ export function checkDueDate(input: unknown): Checked<string | null, ViolationCo
   return real ? { ok: true, value: input } : invalid;
 }
 
-/** Reads a create request: a title, optional notes and an optional due date. */
-export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }, ViolationCode> {
+/** Reads a create request for the To-Do `id`: a title, optional notes and an optional due date. */
+export function parseCreate(
+  input: unknown,
+  id: string,
+): Checked<Change & { op: 'create' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const title = checkTitle(input.title);
   if (!title.ok) return violation('invalid_title', title.message);
@@ -91,14 +116,18 @@ export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }
   return {
     ok: true,
     value: {
-      kind: 'create',
+      op: 'create',
+      id,
       fields: { title: title.title, notes: notes.value, dueDate: dueDate.value, state: 'new' },
     },
   };
 }
 
-/** Reads an edit request: any non-empty subset of title, notes and due date. */
-export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }, ViolationCode> {
+/** Reads an edit request for the To-Do `id`: any non-empty subset of title, notes and due date. */
+export function parseEdit(
+  input: unknown,
+  id: string,
+): Checked<Change & { op: 'edit' }, ViolationCode> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const fields: Partial<Data> = {};
   if ('title' in input) {
@@ -119,35 +148,62 @@ export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }, Vi
   if (Object.keys(fields).length === 0) {
     return violation('invalid_change', 'Change at least one of title, notes or dueDate.');
   }
-  return { ok: true, value: { kind: 'edit', fields } };
+  return { ok: true, value: { op: 'edit', id, fields } };
 }
 
-export type AppliedChange =
-  | { ok: true; data: Data; changedFields: Field[] }
-  | { ok: false; code: 'not_found' | 'already_exists'; message: string };
+/** What apply needs to know: the To-Do's newest version and, for a create, how many exist. */
+export interface Context {
+  current: Version | null;
+  count: number | null;
+}
 
-/**
- * Applies a change to a To-Do's current data (null if it does not exist yet). An empty
- * changedFields means nothing changed, so no new version is needed.
- */
-export function applyChange(current: Data | null, change: Change): AppliedChange {
-  if (change.kind === 'create') {
-    if (current)
-      return { ok: false, code: 'already_exists', message: 'This To-Do already exists.' };
+export async function load(store: Store<Version>, change: Change): Promise<Context> {
+  return {
+    current: await store.newest('todo', change.id),
+    count: change.op === 'create' ? await store.count('todo') : null,
+  };
+}
+
+/** Decides which versions a change appends. None means it changes nothing. */
+export function apply(
+  { current, count }: Context,
+  change: Change,
+  meta: Meta,
+  now: number,
+): Checked<Version[], ViolationCode> {
+  const stamp = {
+    kind: 'todo',
+    id: change.id,
+    change: change.op,
+    changedAt: now,
+    ...meta,
+  } as const;
+  if (change.op === 'create') {
+    if (current) return violation('already_exists', 'This To-Do already exists.');
+    if ((count ?? 0) >= LIMIT) return violation('todo_limit_reached', 'This board is full.');
+    const changedFields = Object.keys(change.fields) as Field[];
     return {
       ok: true,
-      data: change.fields,
-      changedFields: Object.keys(change.fields) as Field[],
+      value: [{ ...stamp, version: 1, createdAt: now, changedFields, data: change.fields }],
     };
   }
-  if (!current) return { ok: false, code: 'not_found', message: 'No such To-Do.' };
+  if (!current) return violation('not_found', 'No such To-Do.');
   const changedFields = (Object.keys(change.fields) as Field[]).filter(
-    (field) => change.fields[field] !== current[field],
+    (field) => change.fields[field] !== current.data[field],
   );
-  return { ok: true, data: { ...current, ...change.fields }, changedFields };
+  if (changedFields.length === 0) return { ok: true, value: [] };
+  return {
+    ok: true,
+    value: [
+      {
+        ...stamp,
+        version: current.version + 1,
+        createdAt: current.createdAt,
+        changedFields,
+        data: { ...current.data, ...change.fields },
+      },
+    ],
+  };
 }
 
-/** Lowest version number to keep once `newest` is written. */
-export function oldestKeptVersion(newest: number): number {
-  return Math.max(1, newest - VERSION_LIMIT + 1);
-}
+export const kind: Kind<Version, Change, ViolationCode, Context> = { load, apply };

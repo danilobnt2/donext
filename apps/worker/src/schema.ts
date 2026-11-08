@@ -9,7 +9,7 @@
 const MIGRATIONS: readonly string[] = [
   // One row per version of a To-Do; its newest version is its current state. Length
   // limits live in @donext/shared, so they can change without rebuilding the table. Rows
-  // are never updated, only appended and, past Todos.VERSION_LIMIT per To-Do, dropped
+  // are never updated, only appended and, past VERSION_LIMIT per To-Do, dropped
   // oldest first. Times are Unix milliseconds.
   `CREATE TABLE todo_versions (
     todo_id TEXT NOT NULL,

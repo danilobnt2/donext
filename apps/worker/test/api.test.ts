@@ -1,7 +1,7 @@
-import { Todos, type Todo, type TodoVersion } from '@donext/shared';
+import { Todos, VERSION_LIMIT, type Todo, type TodoVersion } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { migrate } from '../src/schema';
-import { CURRENT_VERSIONS } from '../src/user-store';
+import { CURRENT_TODOS } from '../src/sql-store';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -120,6 +120,24 @@ describe('/api/v1/todos', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'todo_limit_reached' } });
   });
 
+  it('lets exactly one of several concurrent creates take the last slot', async () => {
+    await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
+      state.storage.sql.exec(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+         INSERT INTO todo_versions (todo_id, version, title, notes, due_date, state, created_at,
+           change, changed_fields, changed_at, device_changed_at, actor_kind, actor_id)
+         SELECT printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
+           'device', NULL
+         FROM n`,
+        Todos.LIMIT - 1,
+      );
+    });
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => post({ title: `Racer ${i}` })),
+    );
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409]);
+  });
+
   it('deletes every To-Do', async () => {
     await post({ title: 'Cut the lawn' });
     await post({ title: 'Renew passport' });
@@ -202,12 +220,12 @@ describe('PATCH /api/v1/todos/:id', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'not_found' } });
   });
 
-  it('keeps the newest Todos.VERSION_LIMIT versions, dropping the oldest', async () => {
+  it('keeps the newest VERSION_LIMIT versions, dropping the oldest', async () => {
     const todo = await created({ title: 'Cut the lawn' });
-    await seedVersions(todo.id, 2, Todos.VERSION_LIMIT - 1);
+    await seedVersions(todo.id, 2, VERSION_LIMIT - 1);
     const res = await patch(todo.id, { title: 'Still cutting the lawn' });
     expect((await res.json<{ todo: Todo }>()).todo).toMatchObject({
-      version: Todos.VERSION_LIMIT + 1,
+      version: VERSION_LIMIT + 1,
       createdAt: todo.createdAt,
     });
 
@@ -218,9 +236,9 @@ describe('PATCH /api/v1/todos/:id', () => {
         )
         .one();
       expect(range).toEqual({
-        count: Todos.VERSION_LIMIT,
+        count: VERSION_LIMIT,
         oldest: 2,
-        newest: Todos.VERSION_LIMIT + 1,
+        newest: VERSION_LIMIT + 1,
       });
     });
   });
@@ -252,7 +270,7 @@ describe('board reads', () => {
   it('grow with the number of To-Dos, not with their versions', async () => {
     const ids: string[] = [];
     for (const title of ['A', 'B', 'C']) ids.push((await created({ title })).id);
-    for (const id of ids) await seedVersions(id, 2, Todos.VERSION_LIMIT - 1);
+    for (const id of ids) await seedVersions(id, 2, VERSION_LIMIT - 1);
 
     await runInDurableObject(env.USER_STORE.getByName('shared-board'), (instance, state) => {
       expect(instance.listTodos().map((t) => [t.title, t.version])).toEqual([
@@ -260,7 +278,7 @@ describe('board reads', () => {
         ['v1000', 1000],
         ['v1000', 1000],
       ]);
-      const cursor = state.storage.sql.exec(CURRENT_VERSIONS);
+      const cursor = state.storage.sql.exec(CURRENT_TODOS);
       cursor.toArray();
       expect(cursor.rowsRead).toBeLessThan(10 * ids.length); // 3,000 versions in total
     });
