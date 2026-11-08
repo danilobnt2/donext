@@ -3,6 +3,7 @@ import { defineConfig } from 'drizzle-kit';
 export default defineConfig({
   dialect: 'sqlite',
   driver: 'durable-sqlite',
-  schema: './src/db/schema.ts',
+  // Each entity type defines its table next to its rules, in the shared package.
+  schema: '../../packages/shared/src/todo.ts',
   out: './drizzle',
 });

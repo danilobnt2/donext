@@ -1,14 +1,12 @@
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import migrations from '../../drizzle/migrations';
-import * as schema from './schema';
-
-export type Db = DrizzleSqliteDODatabase<typeof schema>;
+export type Db = DrizzleSqliteDODatabase;
 
 /** Opens a Durable Object's database and brings its schema up to date. */
 export async function openDb(storage: DurableObjectStorage): Promise<Db> {
   discardBootstrapSchema(storage);
-  const db = drizzle(storage, { schema });
+  const db = drizzle(storage);
   await migrate(db, migrations);
   return db;
 }
