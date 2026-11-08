@@ -1,4 +1,4 @@
-import { TITLE_MAX_LENGTH, TODO_LIMIT, type Todo } from '@donext/shared';
+import { Todos, type Todo } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { openDb } from '../src/db';
 import { env, exports } from 'cloudflare:workers';
@@ -51,7 +51,7 @@ describe('/api/v1/todos', () => {
     ['a missing title', {}],
     ['a blank title', { title: '   ' }],
     ['a non-string title', { title: 7 }],
-    ['an over-long title', { title: 'x'.repeat(TITLE_MAX_LENGTH + 1) }],
+    ['an over-long title', { title: 'x'.repeat(Todos.TITLE_MAX_LENGTH + 1) }],
   ])('rejects %s', async (_, body) => {
     const res = await post(body);
     expect(res.status).toBe(400);
@@ -69,19 +69,35 @@ describe('/api/v1/todos', () => {
     expect(res.status).toBe(413);
   });
 
-  it('refuses new To-Dos once the board holds TODO_LIMIT', async () => {
+  it('refuses new To-Dos once the board holds Todos.LIMIT', async () => {
     const stub = env.USER_STORE.getByName('shared-board');
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
          INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
          SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
-        TODO_LIMIT,
+        Todos.LIMIT,
       );
     });
     const res = await post({ title: 'One too many' });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: { code: 'todo_limit_reached' } });
+  });
+
+  it('lets exactly one of several concurrent creates take the last slot', async () => {
+    const stub = env.USER_STORE.getByName('shared-board');
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
+         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
+        Todos.LIMIT - 1,
+      );
+    });
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => post({ title: `Racer ${i}` })),
+    );
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409]);
   });
 
   it('deletes every To-Do', async () => {
