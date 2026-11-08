@@ -15,7 +15,7 @@ const MIGRATIONS: readonly string[] = [
   )`,
   // One row per version of a To-Do; its newest version is its current state. Length
   // limits live in @donext/shared, so they can change without rebuilding the table. Rows
-  // are never updated, only appended and, past TODO_VERSION_LIMIT per To-Do, dropped oldest
+  // are never updated, only appended and, past Todos.VERSION_LIMIT per To-Do, dropped oldest
   // first. Times are Unix milliseconds. Existing To-Dos become their first version, made
   // by an unidentified app device. Dropping work_items breaks rollback to the previous
   // release, which is accepted.

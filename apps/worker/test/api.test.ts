@@ -1,10 +1,4 @@
-import {
-  TITLE_MAX_LENGTH,
-  TODO_LIMIT,
-  TODO_VERSION_LIMIT,
-  type Todo,
-  type TodoVersion,
-} from '@donext/shared';
+import { Todos, type Todo, type TodoVersion } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
 import { migrate, migrateTo } from '../src/schema';
 import { CURRENT_VERSIONS } from '../src/user-store';
@@ -90,7 +84,7 @@ describe('/api/v1/todos', () => {
     ['a missing title', {}],
     ['a blank title', { title: '   ' }],
     ['a non-string title', { title: 7 }],
-    ['an over-long title', { title: 'x'.repeat(TITLE_MAX_LENGTH + 1) }],
+    ['an over-long title', { title: 'x'.repeat(Todos.TITLE_MAX_LENGTH + 1) }],
   ])('rejects %s', async (_, body) => {
     const res = await post(body);
     expect(res.status).toBe(400);
@@ -108,7 +102,7 @@ describe('/api/v1/todos', () => {
     expect(res.status).toBe(413);
   });
 
-  it('refuses new To-Dos once the board holds TODO_LIMIT', async () => {
+  it('refuses new To-Dos once the board holds Todos.LIMIT', async () => {
     const stub = env.USER_STORE.getByName('shared-board');
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
@@ -118,7 +112,7 @@ describe('/api/v1/todos', () => {
          SELECT printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
            'device', NULL
          FROM n`,
-        TODO_LIMIT,
+        Todos.LIMIT,
       );
     });
     const res = await post({ title: 'One too many' });
@@ -208,12 +202,12 @@ describe('PATCH /api/v1/todos/:id', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'not_found' } });
   });
 
-  it('keeps the newest TODO_VERSION_LIMIT versions, dropping the oldest', async () => {
+  it('keeps the newest Todos.VERSION_LIMIT versions, dropping the oldest', async () => {
     const todo = await created({ title: 'Cut the lawn' });
-    await seedVersions(todo.id, 2, TODO_VERSION_LIMIT - 1);
+    await seedVersions(todo.id, 2, Todos.VERSION_LIMIT - 1);
     const res = await patch(todo.id, { title: 'Still cutting the lawn' });
     expect((await res.json<{ todo: Todo }>()).todo).toMatchObject({
-      version: TODO_VERSION_LIMIT + 1,
+      version: Todos.VERSION_LIMIT + 1,
       createdAt: todo.createdAt,
     });
 
@@ -224,9 +218,9 @@ describe('PATCH /api/v1/todos/:id', () => {
         )
         .one();
       expect(range).toEqual({
-        count: TODO_VERSION_LIMIT,
+        count: Todos.VERSION_LIMIT,
         oldest: 2,
-        newest: TODO_VERSION_LIMIT + 1,
+        newest: Todos.VERSION_LIMIT + 1,
       });
     });
   });
@@ -258,7 +252,7 @@ describe('board reads', () => {
   it('grow with the number of To-Dos, not with their versions', async () => {
     const ids: string[] = [];
     for (const title of ['A', 'B', 'C']) ids.push((await created({ title })).id);
-    for (const id of ids) await seedVersions(id, 2, TODO_VERSION_LIMIT - 1);
+    for (const id of ids) await seedVersions(id, 2, Todos.VERSION_LIMIT - 1);
 
     await runInDurableObject(env.USER_STORE.getByName('shared-board'), (instance, state) => {
       expect(instance.listTodos().map((t) => [t.title, t.version])).toEqual([

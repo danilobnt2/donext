@@ -1,13 +1,8 @@
-import type {
-  Actor,
-  RuleViolationCode,
-  TodoChangeKind,
-  TodoData,
-  TodoField,
-  TodoState,
-} from './todo';
+import type { Actor, RuleViolationCode } from './change';
+import type * as Todos from './todo';
 
-export * from './todo';
+export * as Todos from './todo';
+export { parseDeviceMeta, type Actor, type Checked, type RuleViolationCode } from './change';
 
 /** A To-Do as the API returns it: the data of its newest version. */
 export interface Todo {
@@ -15,7 +10,7 @@ export interface Todo {
   title: string;
   notes: string;
   dueDate: string | null;
-  state: TodoState;
+  state: Todos.State;
   /** Number of the newest version. */
   version: number;
   createdAt: string;
@@ -25,14 +20,14 @@ export interface Todo {
 /** One version of a To-Do: its data after a change, and what, when and who changed it. */
 export interface TodoVersion {
   version: number;
-  change: TodoChangeKind;
-  changedFields: TodoField[];
+  change: Todos.ChangeKind;
+  changedFields: Todos.Field[];
   /** Server time the change was accepted. */
   changedAt: string;
   /** Device time of the change, when the device sent one. */
   deviceChangedAt: string | null;
   actor: Actor;
-  todo: TodoData;
+  todo: Todos.Data;
 }
 
 /** Optional on every write from an app device. */

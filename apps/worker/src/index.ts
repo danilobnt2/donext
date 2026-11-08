@@ -1,10 +1,4 @@
-import {
-  parseCreate,
-  parseDeviceMeta,
-  parseEdit,
-  type ApiError,
-  type ApiErrorCode,
-} from '@donext/shared';
+import { Todos, parseDeviceMeta, type ApiError, type ApiErrorCode } from '@donext/shared';
 import type { UserStore } from './user-store';
 
 export { UserStore } from './user-store';
@@ -58,7 +52,7 @@ export default {
 async function createTodo(request: Request, store: Store): Promise<Response> {
   const body = await readJson(request);
   if (body instanceof Response) return body;
-  const change = parseCreate(body);
+  const change = Todos.parseCreate(body);
   if (!change.ok) return apiError(400, change.code, change.message);
   const meta = parseDeviceMeta(body);
   if (!meta.ok) return apiError(400, meta.code, meta.message);
@@ -71,7 +65,7 @@ async function createTodo(request: Request, store: Store): Promise<Response> {
 async function editTodo(request: Request, store: Store, id: string): Promise<Response> {
   const body = await readJson(request);
   if (body instanceof Response) return body;
-  const change = parseEdit(body);
+  const change = Todos.parseEdit(body);
   if (!change.ok) return apiError(400, change.code, change.message);
   const meta = parseDeviceMeta(body);
   if (!meta.ok) return apiError(400, meta.code, meta.message);

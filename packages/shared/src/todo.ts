@@ -1,7 +1,9 @@
 /**
  * Rules for creating and changing To-Dos. Pure functions with no platform APIs, so the
- * server enforces them and devices can reuse them.
+ * server enforces them and devices can reuse them. Import it as the `Todos` namespace.
  */
+
+import { isObject, violation, type Checked } from './change';
 
 /** Longest To-Do title accepted, in characters (Unicode code points). */
 export const TITLE_MAX_LENGTH = 500;
@@ -10,15 +12,15 @@ export const TITLE_MAX_LENGTH = 500;
 export const NOTES_MAX_LENGTH = 2000;
 
 /** Most To-Dos one board can hold. Becomes the per-user limit once sign-in exists. */
-export const TODO_LIMIT = 10_000;
+export const LIMIT = 10_000;
 
 /** Versions kept per To-Do. Older ones are dropped first; the newest is always kept. */
-export const TODO_VERSION_LIMIT = 1000;
+export const VERSION_LIMIT = 1000;
 
-export type TodoState = 'new' | 'active' | 'pending' | 'done';
+export type State = 'new' | 'active' | 'pending' | 'done';
 
 /** What a person edits on a To-Do. */
-export interface TodoFields {
+export interface Fields {
   title: string;
   /** Empty when there are none. */
   notes: string;
@@ -26,29 +28,16 @@ export interface TodoFields {
   dueDate: string | null;
 }
 
-export type TodoField = keyof TodoFields;
+export type Field = keyof Fields;
 
 /** A To-Do's data as one version holds it. */
-export interface TodoData extends TodoFields {
-  state: TodoState;
+export interface Data extends Fields {
+  state: State;
 }
 
-export type TodoChange =
-  { kind: 'create'; fields: TodoFields } | { kind: 'edit'; fields: Partial<TodoFields> };
+export type Change = { kind: 'create'; fields: Fields } | { kind: 'edit'; fields: Partial<Fields> };
 
-export type TodoChangeKind = TodoChange['kind'];
-
-/** Who or what made a change. Connectors arrive with AI connectors. */
-export type Actor =
-  | { kind: 'device'; id: string | null }
-  | { kind: 'system'; id: null }
-  | { kind: 'connector'; id: string };
-
-export type RuleViolationCode =
-  'invalid_title' | 'invalid_notes' | 'invalid_due_date' | 'invalid_change' | 'invalid_device';
-
-export type Checked<T> =
-  { ok: true; value: T } | { ok: false; code: RuleViolationCode; message: string };
+export type ChangeKind = Change['kind'];
 
 export type TitleCheck = { ok: true; title: string } | { ok: false; message: string };
 
@@ -86,7 +75,7 @@ export function checkDueDate(input: unknown): Checked<string | null> {
 }
 
 /** Reads a create request: a title, optional notes and an optional due date. */
-export function parseCreate(input: unknown): Checked<TodoChange & { kind: 'create' }> {
+export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
   const title = checkTitle(input.title);
   if (!title.ok) return violation('invalid_title', title.message);
@@ -105,9 +94,9 @@ export function parseCreate(input: unknown): Checked<TodoChange & { kind: 'creat
 }
 
 /** Reads an edit request: any non-empty subset of title, notes and due date. */
-export function parseEdit(input: unknown): Checked<TodoChange & { kind: 'edit' }> {
+export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
-  const fields: Partial<TodoFields> = {};
+  const fields: Partial<Fields> = {};
   if ('title' in input) {
     const title = checkTitle(input.title);
     if (!title.ok) return violation('invalid_title', title.message);
@@ -130,14 +119,14 @@ export function parseEdit(input: unknown): Checked<TodoChange & { kind: 'edit' }
 }
 
 export type AppliedChange =
-  | { ok: true; data: TodoData; changedFields: TodoField[] }
+  | { ok: true; data: Data; changedFields: Field[] }
   | { ok: false; code: 'not_found' | 'already_exists'; message: string };
 
 /**
  * Applies a change to a To-Do's current data (null if it does not exist yet). An empty
  * changedFields means nothing changed, so no new version is needed.
  */
-export function applyChange(current: TodoData | null, change: TodoChange): AppliedChange {
+export function applyChange(current: Data | null, change: Change): AppliedChange {
   if (change.kind === 'create') {
     if (current)
       return { ok: false, code: 'already_exists', message: 'This To-Do already exists.' };
@@ -148,7 +137,7 @@ export function applyChange(current: TodoData | null, change: TodoChange): Appli
     };
   }
   if (!current) return { ok: false, code: 'not_found', message: 'No such To-Do.' };
-  const changedFields = (Object.keys(change.fields) as TodoField[]).filter(
+  const changedFields = (Object.keys(change.fields) as Field[]).filter(
     (field) => change.fields[field] !== current[field],
   );
   return { ok: true, data: { ...current, ...change.fields }, changedFields };
@@ -156,47 +145,5 @@ export function applyChange(current: TodoData | null, change: TodoChange): Appli
 
 /** Lowest version number to keep once `newest` is written. */
 export function oldestKeptVersion(newest: number): number {
-  return Math.max(1, newest - TODO_VERSION_LIMIT + 1);
-}
-
-const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-
-/**
- * Reads the optional device id and device time of a change made on an app device. A
- * device time older or newer than the server's is accepted: offline edits arrive late.
- */
-export function parseDeviceMeta(
-  input: unknown,
-): Checked<{ actor: Actor & { kind: 'device' }; deviceChangedAt: number | null }> {
-  const body = isObject(input) ? input : {};
-  let id: string | null = null;
-  if ('deviceId' in body) {
-    if (typeof body.deviceId !== 'string' || !ULID.test(body.deviceId)) {
-      return violation('invalid_device', 'deviceId must be a ULID.');
-    }
-    id = body.deviceId;
-  }
-  let deviceChangedAt: number | null = null;
-  if ('deviceChangedAt' in body) {
-    const time = typeof body.deviceChangedAt === 'string' ? Date.parse(body.deviceChangedAt) : NaN;
-    if (
-      !Number.isFinite(time) ||
-      !/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:\d{2})$/.test(String(body.deviceChangedAt))
-    ) {
-      return violation('invalid_device', 'deviceChangedAt must be an ISO 8601 time with a zone.');
-    }
-    deviceChangedAt = time;
-  }
-  return { ok: true, value: { actor: { kind: 'device', id }, deviceChangedAt } };
-}
-
-function isObject(input: unknown): input is Record<string, unknown> {
-  return input !== null && typeof input === 'object' && !Array.isArray(input);
-}
-
-function violation(
-  code: RuleViolationCode,
-  message: string,
-): { ok: false; code: RuleViolationCode; message: string } {
-  return { ok: false, code, message };
+  return Math.max(1, newest - VERSION_LIMIT + 1);
 }

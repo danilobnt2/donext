@@ -1,17 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import {
-  TODO_LIMIT,
-  applyChange,
-  oldestKeptVersion,
-  type Actor,
-  type Todo,
-  type TodoChange,
-  type TodoChangeKind,
-  type TodoData,
-  type TodoField,
-  type TodoState,
-  type TodoVersion,
-} from '@donext/shared';
+import { Todos, type Actor, type Todo, type TodoVersion } from '@donext/shared';
 import { ulid } from 'ulid';
 import { migrate } from './schema';
 
@@ -21,9 +9,9 @@ type VersionRow = {
   title: string;
   notes: string;
   due_date: string | null;
-  state: TodoState;
+  state: Todos.State;
   created_at: number;
-  change: TodoChangeKind;
+  change: Todos.ChangeKind;
   changed_fields: string;
   changed_at: number;
   device_changed_at: number | null;
@@ -76,10 +64,10 @@ export class UserStore extends DurableObject<Env> {
       .map(toTodo);
   }
 
-  createTodo(change: TodoChange & { kind: 'create' }, meta: WriteMeta): CreateTodoResult {
+  createTodo(change: Todos.Change & { kind: 'create' }, meta: WriteMeta): CreateTodoResult {
     const { count } = this.ctx.storage.sql.exec<{ count: number }>(COUNT_TODOS).one();
-    if (count >= TODO_LIMIT) return { ok: false, reason: 'limit_reached' };
-    const applied = applyChange(null, change);
+    if (count >= Todos.LIMIT) return { ok: false, reason: 'limit_reached' };
+    const applied = Todos.applyChange(null, change);
     if (!applied.ok) throw new Error(applied.message);
     const now = Date.now();
     const row = this.append(
@@ -96,10 +84,10 @@ export class UserStore extends DurableObject<Env> {
   }
 
   /** Appends a version unless the edit changes nothing. */
-  editTodo(id: string, change: TodoChange & { kind: 'edit' }, meta: WriteMeta): EditTodoResult {
+  editTodo(id: string, change: Todos.Change & { kind: 'edit' }, meta: WriteMeta): EditTodoResult {
     const current = this.newestVersion(id);
     if (!current) return { ok: false, reason: 'not_found' };
-    const applied = applyChange(toData(current), change);
+    const applied = Todos.applyChange(toData(current), change);
     if (!applied.ok) throw new Error(applied.message);
     if (applied.changedFields.length === 0) return { ok: true, todo: toTodo(current) };
     const row = this.append(
@@ -152,15 +140,15 @@ export class UserStore extends DurableObject<Env> {
     );
   }
 
-  /** Writes a new version and drops the ones past TODO_VERSION_LIMIT, in one transaction. */
+  /** Writes a new version and drops the ones past Todos.VERSION_LIMIT, in one transaction. */
   private append(
     id: string,
     version: number,
     createdAt: number,
     changedAt: number,
-    change: TodoChangeKind,
-    data: TodoData,
-    changedFields: TodoField[],
+    change: Todos.ChangeKind,
+    data: Todos.Data,
+    changedFields: Todos.Field[],
     meta: WriteMeta,
   ): VersionRow {
     const row: VersionRow = {
@@ -189,14 +177,14 @@ export class UserStore extends DurableObject<Env> {
       this.ctx.storage.sql.exec(
         'DELETE FROM todo_versions WHERE todo_id = ? AND version < ?',
         id,
-        oldestKeptVersion(version),
+        Todos.oldestKeptVersion(version),
       );
     });
     return row;
   }
 }
 
-function toData(row: VersionRow): TodoData {
+function toData(row: VersionRow): Todos.Data {
   return { title: row.title, notes: row.notes, dueDate: row.due_date, state: row.state };
 }
 
@@ -214,7 +202,7 @@ function toVersion(row: VersionRow): TodoVersion {
   return {
     version: row.version,
     change: row.change,
-    changedFields: JSON.parse(row.changed_fields) as TodoField[],
+    changedFields: JSON.parse(row.changed_fields) as Todos.Field[],
     changedAt: new Date(row.changed_at).toISOString(),
     deviceChangedAt:
       row.device_changed_at === null ? null : new Date(row.device_changed_at).toISOString(),
