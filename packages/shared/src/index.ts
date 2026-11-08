@@ -2,22 +2,13 @@ import type * as Todos from './todo';
 
 export * as Todos from './todo';
 export {
-  EntityType,
   write,
   type Checked,
   type EntityBase,
-  type EntityTable,
+  type Kind,
   type RuleViolationCode,
   type Store,
-} from './entity';
-export {
-  entities,
-  type ChangeOf,
-  type CodeOf,
-  type Entity,
-  type EntityOf,
-  type Kind,
-} from './entities';
+} from './change';
 
 /** A To-Do as the API returns it. */
 export interface Todo {
