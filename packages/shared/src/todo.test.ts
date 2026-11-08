@@ -7,7 +7,10 @@ describe('parseCreate', () => {
   it('defaults notes to empty and the due date to none', () => {
     expect(Todos.parseCreate({ title: ' Cut the lawn ' })).toEqual({
       ok: true,
-      value: { kind: 'create', fields: { title: 'Cut the lawn', notes: '', dueDate: null } },
+      value: {
+        kind: 'create',
+        fields: { title: 'Cut the lawn', notes: '', dueDate: null, state: 'new' },
+      },
     });
   });
 
@@ -35,6 +38,10 @@ describe('parseEdit', () => {
     expect(Todos.parseEdit({ deviceId: 'x' })).toMatchObject({ ok: false, code: 'invalid_change' });
   });
 
+  it('ignores state: devices never set it directly', () => {
+    expect(Todos.parseEdit({ state: 'done' })).toMatchObject({ ok: false, code: 'invalid_change' });
+  });
+
   it('rejects a blank title', () => {
     expect(Todos.parseEdit({ title: ' ' })).toMatchObject({ ok: false, code: 'invalid_title' });
   });
@@ -57,7 +64,7 @@ describe('applyChange', () => {
     expect(Todos.applyChange(null, change.value)).toEqual({
       ok: true,
       data: todo,
-      changedFields: ['title', 'notes', 'dueDate'],
+      changedFields: ['title', 'notes', 'dueDate', 'state'],
     });
   });
 

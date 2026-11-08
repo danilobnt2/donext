@@ -161,7 +161,7 @@ describe('PATCH /api/v1/todos/:id', () => {
     const { versions } = await versionsOf(todo.id);
     expect(versions.map((v) => [v.version, v.change, v.changedFields])).toEqual([
       [2, 'edit', ['notes', 'dueDate']],
-      [1, 'create', ['title', 'notes', 'dueDate']],
+      [1, 'create', ['title', 'notes', 'dueDate', 'state']],
     ]);
     expect(versions[0]).toMatchObject({
       deviceChangedAt: '2026-11-04T09:00:00.000Z',
@@ -307,7 +307,7 @@ describe('schema migration', () => {
           state: 'new',
           created_at: Date.parse('2026-10-30T08:15:42.123Z'),
           change: 'create',
-          changed_fields: '["title","notes","dueDate"]',
+          changed_fields: '["title","notes","dueDate","state"]',
           changed_at: Date.parse('2026-10-30T08:15:42.123Z'),
           device_changed_at: null,
           actor_kind: 'device',

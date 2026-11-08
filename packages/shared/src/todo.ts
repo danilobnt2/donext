@@ -19,23 +19,20 @@ export const VERSION_LIMIT = 1000;
 
 export type State = 'new' | 'active' | 'pending' | 'done';
 
-/** What a person edits on a To-Do. */
-export interface Fields {
+/** A To-Do's data as one version holds it. */
+export interface Data {
   title: string;
   /** Empty when there are none. */
   notes: string;
   /** Calendar date as YYYY-MM-DD. */
   dueDate: string | null;
-}
-
-export type Field = keyof Fields;
-
-/** A To-Do's data as one version holds it. */
-export interface Data extends Fields {
   state: State;
 }
 
-export type Change = { kind: 'create'; fields: Fields } | { kind: 'edit'; fields: Partial<Fields> };
+export type Field = keyof Data;
+
+/** Which fields a device may set is up to parseCreate and parseEdit, not to this type. */
+export type Change = { kind: 'create'; fields: Data } | { kind: 'edit'; fields: Partial<Data> };
 
 export type ChangeKind = Change['kind'];
 
@@ -88,7 +85,7 @@ export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }
     ok: true,
     value: {
       kind: 'create',
-      fields: { title: title.title, notes: notes.value, dueDate: dueDate.value },
+      fields: { title: title.title, notes: notes.value, dueDate: dueDate.value, state: 'new' },
     },
   };
 }
@@ -96,7 +93,7 @@ export function parseCreate(input: unknown): Checked<Change & { kind: 'create' }
 /** Reads an edit request: any non-empty subset of title, notes and due date. */
 export function parseEdit(input: unknown): Checked<Change & { kind: 'edit' }> {
   if (!isObject(input)) return violation('invalid_change', 'Body must be a JSON object.');
-  const fields: Partial<Fields> = {};
+  const fields: Partial<Data> = {};
   if ('title' in input) {
     const title = checkTitle(input.title);
     if (!title.ok) return violation('invalid_title', title.message);
@@ -132,8 +129,8 @@ export function applyChange(current: Data | null, change: Change): AppliedChange
       return { ok: false, code: 'already_exists', message: 'This To-Do already exists.' };
     return {
       ok: true,
-      data: { ...change.fields, state: 'new' },
-      changedFields: ['title', 'notes', 'dueDate'],
+      data: change.fields,
+      changedFields: Object.keys(change.fields) as Field[],
     };
   }
   if (!current) return { ok: false, code: 'not_found', message: 'No such To-Do.' };

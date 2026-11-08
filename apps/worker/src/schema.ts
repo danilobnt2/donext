@@ -42,7 +42,7 @@ const MIGRATIONS: readonly string[] = [
     todo_id, version, title, notes, due_date, state, created_at, change, changed_fields,
     changed_at, device_changed_at, actor_kind, actor_id
   )
-  SELECT id, 1, title, '', NULL, state, ms, 'create', '["title","notes","dueDate"]', ms, NULL, 'device', NULL
+  SELECT id, 1, title, '', NULL, state, ms, 'create', '["title","notes","dueDate","state"]', ms, NULL, 'device', NULL
   FROM (
     SELECT *, CAST(round((julianday(created_at) - 2440587.5) * 86400000) AS INTEGER) AS ms
     FROM work_items WHERE type = 'todo'
