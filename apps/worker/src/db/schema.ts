@@ -11,24 +11,17 @@ import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
  * Times are Unix milliseconds.
  */
 
-/** The columns of a table whose entities are versions (see versions.ts in @donext/shared). */
-function versionColumns<Change extends string>(changes: readonly [Change, ...Change[]]) {
-  return {
-    version: integer('version').notNull(),
-    createdAt: integer('created_at').notNull(),
-    change: text('change', { enum: changes }).notNull(),
-    changedAt: integer('changed_at').notNull(),
-    deviceChangedAt: integer('device_changed_at'),
-    actor: text('actor', { mode: 'json' }).$type<Actor>().notNull(),
-  };
-}
-
 export const todoVersions = sqliteTable(
   'todo_versions',
   {
     id: text('id').primaryKey(),
     todoId: text('todo_id').notNull(),
-    ...versionColumns<Todos.ChangeKind>(Todos.CHANGES),
+    version: integer('version').notNull(),
+    createdAt: integer('created_at').notNull(),
+    change: text('change', { enum: Todos.CHANGES }).notNull(),
+    changedAt: integer('changed_at').notNull(),
+    deviceChangedAt: integer('device_changed_at'),
+    actor: text('actor', { mode: 'json' }).$type<Actor>().notNull(),
     title: text('title').notNull(),
     notes: text('notes').notNull(),
     dueDate: text('due_date'),
