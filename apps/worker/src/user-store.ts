@@ -8,6 +8,8 @@ import {
   type Entity,
   type EntityOf,
   type Kind,
+  type FieldOf,
+  type Meta,
 } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
@@ -15,8 +17,8 @@ import { mappings } from './entities';
 
 /**
  * One user's data. Until sign-in exists, a single shared instance holds everything. It
- * only routes: the kinds of entity and their rules live in @donext/shared, their tables in
- * entities.ts.
+ * knows no kind of entity: the kinds and their rules live in @donext/shared, their tables
+ * in entities.ts, and what a request means in the HTTP layer.
  */
 export class UserStore extends DurableObject<Env> {
   private store!: DbStore<Entity>;
@@ -28,28 +30,33 @@ export class UserStore extends DurableObject<Env> {
     });
   }
 
-  /** Every entity of a type, newest first. */
-  list<K extends Kind>(type: K): EntityOf<K>[] {
-    return this.store.list(type);
+  count<K extends Kind>(kind: K, distinct?: FieldOf<EntityOf<K>>): number {
+    return this.store.countSync(kind, distinct as FieldOf<Extract<Entity, { kind: K }>>);
   }
 
-  /** Applies a change and returns the entity it targets as it now stands. */
-  async write<K extends Kind>(
-    type: K,
+  newestPer<K extends Kind>(
+    kind: K,
+    groupBy: FieldOf<EntityOf<K>>,
+    orderBy: FieldOf<EntityOf<K>>,
+  ): EntityOf<K>[] {
+    type Field = FieldOf<Extract<Entity, { kind: K }>>;
+    return this.store.newestPerSync(kind, groupBy as Field, orderBy as Field);
+  }
+
+  /** Applies a change with its kind's rules and returns what it wrote. */
+  write<K extends Kind>(
+    kind: K,
     change: ChangeOf<K>,
-  ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
-    const result = await write(entities[type], this.store, change, Date.now());
-    if (!result.ok) return result;
-    const entity = result.value.find((e) => e.kind === type && e.id === change.id);
-    if (!entity) throw new Error(`Writing ${type} ${change.id} did not produce it.`);
-    return { ok: true, value: entity as EntityOf<K> };
+    meta: Meta,
+  ): Promise<Checked<Entity[], CodeOf<K>>> {
+    return write(entities[kind], this.store, change, meta, Date.now());
   }
 
   /**
-   * Deletes every entity of a type. Lets anyone clear the shared board of unwanted content
-   * until sign-in gives each user their own; remove it then.
+   * Deletes every entity of a kind and returns how many there were. Lets anyone clear the
+   * shared board of unwanted content until sign-in gives each user their own; remove it then.
    */
-  deleteAll(type: Kind): number {
-    return this.store.deleteAll(type);
+  deleteAll(kind: Kind): number {
+    return this.store.deleteAll(kind);
   }
 }

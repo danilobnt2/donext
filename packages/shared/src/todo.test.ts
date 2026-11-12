@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 import * as Todos from './todo';
 
 const ID = '01JC0000000000000000000000';
-const todo: Todos.Entity = {
-  kind: 'todo',
-  type: 'todo',
-  id: ID,
-  title: 'Cut the lawn',
-  state: 'new',
-  rev: 1,
+const meta = { actor: { kind: 'device' }, deviceChangedAt: null } as const;
+const v1: Todos.Entity = {
+  kind: 'todoVersion',
+  id: `${ID}:1`,
+  todoId: ID,
+  version: 1,
   createdAt: 100,
-  updatedAt: 100,
+  change: 'create',
+  changedAt: 100,
+  ...meta,
+  title: 'Cut the lawn',
+  notes: '',
+  dueDate: null,
+  state: 'new',
 };
 
 describe('checkTitle', () => {
@@ -32,10 +37,10 @@ describe('checkTitle', () => {
 });
 
 describe('parseCreate', () => {
-  it('reads a trimmed title for the given id', () => {
+  it('reads a trimmed title for the given To-Do', () => {
     expect(Todos.parseCreate({ title: ' Cut the lawn ' }, ID)).toEqual({
       ok: true,
-      value: { op: 'create', id: ID, title: 'Cut the lawn' },
+      value: { op: 'create', todoId: ID, title: 'Cut the lawn' },
     });
   });
 
@@ -50,21 +55,21 @@ describe('parseCreate', () => {
 });
 
 describe('apply', () => {
-  const create = { op: 'create', id: ID, title: 'Cut the lawn' } as const;
+  const create = { op: 'create', todoId: ID, title: 'Cut the lawn' } as const;
 
-  it('creates a To-Do in state New, at revision 1', () => {
-    expect(Todos.apply({ current: null, count: 0 }, create, 100)).toEqual({
+  it('creates version 1 of the To-Do, in state New', () => {
+    expect(Todos.apply({ exists: false, count: 0 }, create, meta, 100)).toEqual({
       ok: true,
-      value: [todo],
+      value: [v1],
     });
   });
 
   it('refuses to create a To-Do twice or past LIMIT', () => {
-    expect(Todos.apply({ current: todo, count: 1 }, create, 200)).toMatchObject({
+    expect(Todos.apply({ exists: true, count: 1 }, create, meta, 200)).toMatchObject({
       ok: false,
       code: 'already_exists',
     });
-    expect(Todos.apply({ current: null, count: Todos.LIMIT }, create, 200)).toMatchObject({
+    expect(Todos.apply({ exists: false, count: Todos.LIMIT }, create, meta, 200)).toMatchObject({
       ok: false,
       code: 'todo_limit_reached',
     });

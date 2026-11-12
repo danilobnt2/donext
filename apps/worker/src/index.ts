@@ -1,4 +1,4 @@
-import { Todos, type ApiError, type ApiErrorCode, type Todo } from '@donext/shared';
+import { Todos, type ApiError, type ApiErrorCode, type Meta, type Todo } from '@donext/shared';
 import { ulid } from 'ulid';
 import type { UserStore } from './user-store';
 
@@ -7,6 +7,9 @@ export { UserStore } from './user-store';
 /** Every request uses this one store until sign-in gives each user their own. */
 const SHARED_BOARD = 'shared-board';
 const MAX_BODY_BYTES = 4096;
+
+/** Every change so far comes from the app, which sends no device details yet. */
+const FROM_APP: Meta = { actor: { kind: 'device' }, deviceChangedAt: null };
 
 /** HTTP status for each rule a change can break; any other code is a 400. */
 const STATUS: Partial<Record<ApiErrorCode, number>> = {
@@ -24,11 +27,17 @@ export default {
 
     if (pathname === '/api/v1/todos') {
       const store = env.USER_STORE.getByName(SHARED_BOARD);
-      if (request.method === 'GET')
-        return Response.json({ todos: (await store.list('todo')).map(toTodo) });
+      if (request.method === 'GET') {
+        const board = await store.newestPer('todoVersion', 'todoId', 'version');
+        return Response.json({ todos: board.map(toTodo) });
+      }
       if (request.method === 'POST') return createTodo(request, store);
-      if (request.method === 'DELETE')
-        return Response.json({ deleted: await store.deleteAll('todo') });
+      if (request.method === 'DELETE') {
+        // Reports To-Dos, not versions; the brief gap between the two calls is harmless here.
+        const deleted = await store.count('todoVersion', 'todoId');
+        await store.deleteAll('todoVersion');
+        return Response.json({ deleted });
+      }
       return new Response(null, { status: 405, headers: { Allow: 'GET, POST, DELETE' } });
     }
 
@@ -56,15 +65,17 @@ async function createTodo(
   const change = Todos.parseCreate(body, ulid());
   if (!change.ok) return ruleError(change);
 
-  const result = await store.write('todo', change.value);
+  const result = await store.write('todoVersion', change.value, FROM_APP);
   if (!result.ok) return ruleError(result);
-  return Response.json({ todo: toTodo(result.value) }, { status: 201 });
+  const [created] = result.value;
+  if (!created) throw new Error(`Creating To-Do ${change.value.todoId} wrote nothing.`);
+  return Response.json({ todo: toTodo(created) }, { status: 201 });
 }
 
-/** A To-Do as the API returns it. */
+/** A To-Do as the API returns it: its newest version. */
 function toTodo(todo: Todos.Entity): Todo {
   return {
-    id: todo.id,
+    id: todo.todoId,
     title: todo.title,
     state: todo.state,
     createdAt: new Date(todo.createdAt).toISOString(),

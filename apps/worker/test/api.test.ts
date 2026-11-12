@@ -1,6 +1,9 @@
 import { Todos, type Todo } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import { openDb } from '../src/db';
+import { newestPerSql } from '../src/db-store';
+import { todoVersions } from '../src/db/schema';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -10,15 +13,41 @@ const api = (path: string, init?: RequestInit) =>
 // Durable Object storage persists across tests in this file, so start each one empty.
 beforeEach(async () => {
   await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
-    state.storage.sql.exec('DELETE FROM work_items');
+    state.storage.sql.exec('DELETE FROM todo_versions');
   });
 });
 
-const post = (body: unknown) =>
-  api('/api/v1/todos', {
-    method: 'POST',
+const send = (method: string, path: string, body: unknown) =>
+  api(path, {
+    method,
     headers: { 'content-type': 'application/json' },
     body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+const post = (body: unknown) => send('POST', '/api/v1/todos', body);
+/** The board query as SQL text, to measure what it reads. */
+const newestVersionsQuery = () => {
+  const { sql, params } = new SQLiteSyncDialect().sqlToQuery(
+    newestPerSql(todoVersions, todoVersions.todoId, todoVersions.version),
+  );
+  return [sql, ...params] as const;
+};
+const created = async (body: unknown) => (await (await post(body)).json<{ todo: Todo }>()).todo;
+
+/** Inserts `count` versions numbered from `from` for one To-Do, straight into storage. */
+const seedVersions = (id: string, from: number, count: number) =>
+  runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
+    state.storage.sql.exec(
+      `WITH RECURSIVE n(i) AS (SELECT CAST(?1 AS INTEGER) UNION ALL SELECT i + 1 FROM n WHERE i < ?2)
+       INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
+         change, changed_at, device_changed_at, actor)
+       SELECT ?3 || ':' || i, ?3, i, 'v' || i, '', NULL, 'new',
+         (SELECT MIN(created_at) FROM todo_versions WHERE todo_id = ?3),
+         'edit', i, NULL, '{"kind":"device","id":null}'
+       FROM n`,
+      from,
+      from + count - 1,
+      id,
+    );
   });
 
 describe('GET /api/v1/health', () => {
@@ -74,8 +103,11 @@ describe('/api/v1/todos', () => {
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
-         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
+         INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
+           change, changed_at, device_changed_at, actor)
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', 0, NULL,
+           '{"kind":"device","id":null}'
+         FROM n`,
         Todos.LIMIT,
       );
     });
@@ -85,12 +117,14 @@ describe('/api/v1/todos', () => {
   });
 
   it('lets exactly one of several concurrent creates take the last slot', async () => {
-    const stub = env.USER_STORE.getByName('shared-board');
-    await runInDurableObject(stub, (_instance, state) => {
+    await runInDurableObject(env.USER_STORE.getByName('shared-board'), (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
-         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
+         INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
+           change, changed_at, device_changed_at, actor)
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', 0, NULL,
+           '{"kind":"device","id":null}'
+         FROM n`,
         Todos.LIMIT - 1,
       );
     });
@@ -115,6 +149,28 @@ describe('/api/v1/todos', () => {
   });
 });
 
+describe('board reads', () => {
+  it('grow with the number of To-Dos, not with their versions', async () => {
+    const ids: string[] = [];
+    for (const title of ['A', 'B', 'C']) ids.push((await created({ title })).id);
+    // Nothing writes later versions yet, so they go straight into storage.
+    for (const id of ids) await seedVersions(id, 2, 999);
+
+    await runInDurableObject(env.USER_STORE.getByName('shared-board'), (instance, state) => {
+      expect(
+        instance.newestPer('todoVersion', 'todoId', 'version').map((t) => [t.title, t.version]),
+      ).toEqual([
+        ['v1000', 1000],
+        ['v1000', 1000],
+        ['v1000', 1000],
+      ]);
+      const cursor = state.storage.sql.exec(...newestVersionsQuery());
+      cursor.toArray();
+      expect(cursor.rowsRead).toBeLessThan(10 * ids.length); // 3,000 versions in total
+    });
+  });
+});
+
 describe('unknown API routes', () => {
   it.each(['/api/nope', '/api/todos'])('%s returns a JSON 404', async (path) => {
     const res = await api(path);
@@ -129,6 +185,12 @@ describe('database setup', () => {
       const sql = state.storage.sql;
       // Rewind this object to what the pre-Drizzle runner left behind.
       sql.exec('DROP TABLE __drizzle_migrations');
+      sql.exec('DROP TABLE todo_versions');
+      sql.exec(
+        `CREATE TABLE work_items (id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
+           state TEXT NOT NULL, rev INTEGER NOT NULL, created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL)`,
+      );
       sql.exec(
         "INSERT INTO work_items VALUES ('01JBZZZZZZZZZZZZZZZZZZZZZ1', 'todo', 'Old', 'new', 1, '', '')",
       );
@@ -146,9 +208,9 @@ describe('database setup', () => {
         )
         .toArray()
         .map((t) => t.name);
-      expect(tables).toEqual(['__drizzle_migrations', 'work_items']);
-      expect(sql.exec('SELECT COUNT(*) AS n FROM work_items').one()).toEqual({ n: 0 });
-      expect(sql.exec('SELECT COUNT(*) AS n FROM __drizzle_migrations').one()).toEqual({ n: 1 });
+      expect(tables).toEqual(['__drizzle_migrations', 'todo_versions']);
+      expect(sql.exec('SELECT COUNT(*) AS n FROM todo_versions').one()).toEqual({ n: 0 });
+      expect(sql.exec('SELECT COUNT(*) AS n FROM __drizzle_migrations').one()).toEqual({ n: 2 });
     });
   });
 });
