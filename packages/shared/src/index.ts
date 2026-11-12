@@ -17,7 +17,7 @@ export {
   type Store,
   type Writes,
 } from './change';
-export { VERSION_LIMIT, oldestKeptVersion, type VersionFields } from './versions';
+export { VERSION_LIMIT, oldestKeptVersion } from './versions';
 export {
   entities,
   type ChangeOf,

@@ -17,7 +17,7 @@ import {
   type Store,
   type Writes,
 } from './change';
-import { VERSION_LIMIT, oldestKeptVersion, type VersionFields } from './versions';
+import { VERSION_LIMIT, oldestKeptVersion } from './versions';
 
 /** Rule violations a To-Do change can report. */
 export type ViolationCode =
@@ -46,12 +46,19 @@ export const CHANGES = ['create', 'edit'] as const;
 
 export type ChangeKind = (typeof CHANGES)[number];
 
-/** One version of a To-Do: its data after a change, and what, when and who changed it. */
-export interface Entity extends EntityBase, VersionFields<ChangeKind> {
+/** One version of a To-Do: its data after a change, and when and who changed it. */
+export interface Entity extends EntityBase, Meta {
   kind: 'todoVersion';
   /** Derived from the To-Do and the version number: see versionId. */
   id: string;
   todoId: string;
+  /** The version number, starting at 1. */
+  version: number;
+  /** When the To-Do was created; copied into every version, since old ones get dropped. */
+  createdAt: number;
+  change: ChangeKind;
+  /** When the change was accepted, on the clock of whoever runs the rules. Unix milliseconds. */
+  changedAt: number;
   title: string;
   /** Empty when there are none. */
   notes: string;
