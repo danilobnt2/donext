@@ -44,7 +44,8 @@ export interface Todo {
 export interface TodoVersion {
   version: number;
   change: Todos.ChangeKind;
-  changedFields: Todos.Field[];
+  /** Compared with the version before; null when that one was dropped past VERSION_LIMIT. */
+  changedFields: Todos.Field[] | null;
   /** Server time the change was accepted. */
   changedAt: string;
   /** Device time of the change, when the device sent one. */

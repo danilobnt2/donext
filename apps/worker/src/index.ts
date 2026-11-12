@@ -109,16 +109,19 @@ async function listVersions(url: URL, store: UserStub, id: string): Promise<Resp
   if (before !== null && !(Number.isSafeInteger(before) && before >= 1)) {
     return apiError(400, 'invalid_cursor', 'before must be a version number.');
   }
-  const versions = await store.find('todoVersion', {
+  // One more than a page, so the page's oldest version can be compared with the one before.
+  const found = await store.find('todoVersion', {
     where: { todoId: id },
     ...(before === null ? {} : { before: { field: 'version' as const, value: before } }),
     orderBy: { field: 'version', desc: true },
-    limit: VERSIONS_PAGE_SIZE,
+    limit: VERSIONS_PAGE_SIZE + 1,
   });
-  if (versions.length === 0 && before === null) return apiError(404, 'not_found', 'No such To-Do.');
-  const last = versions.at(-1);
-  const nextBefore = versions.length === VERSIONS_PAGE_SIZE && last ? last.version : null;
-  return Response.json({ versions: versions.map(toTodoVersion), nextBefore });
+  if (found.length === 0 && before === null) return apiError(404, 'not_found', 'No such To-Do.');
+  const page = found.slice(0, VERSIONS_PAGE_SIZE);
+  const versions = page.map((version, i) => toTodoVersion(version, found[i + 1] ?? null));
+  const last = page.at(-1);
+  const nextBefore = found.length > VERSIONS_PAGE_SIZE && last ? last.version : null;
+  return Response.json({ versions, nextBefore });
 }
 
 /** The To-Do's version a write appended or, if it changed nothing, its newest one. */
@@ -152,12 +155,12 @@ function toTodo(todo: Todos.Entity): Todo {
   };
 }
 
-/** One version of a To-Do as the API returns it. */
-function toTodoVersion(todo: Todos.Entity): TodoVersion {
+/** One version of a To-Do as the API returns it, given the version before it if kept. */
+function toTodoVersion(todo: Todos.Entity, previous: Todos.Entity | null): TodoVersion {
   return {
     version: todo.version,
     change: todo.change,
-    changedFields: todo.changedFields,
+    changedFields: Todos.changedFields(todo, previous),
     changedAt: new Date(todo.changedAt).toISOString(),
     deviceChangedAt:
       todo.deviceChangedAt === null ? null : new Date(todo.deviceChangedAt).toISOString(),

@@ -12,14 +12,11 @@ import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
  */
 
 /** The columns of a table whose entities are versions (see versions.ts in @donext/shared). */
-function versionColumns<Change extends string, Field extends string>(
-  changes: readonly [Change, ...Change[]],
-) {
+function versionColumns<Change extends string>(changes: readonly [Change, ...Change[]]) {
   return {
     version: integer('version').notNull(),
     createdAt: integer('created_at').notNull(),
     change: text('change', { enum: changes }).notNull(),
-    changedFields: text('changed_fields', { mode: 'json' }).$type<Field[]>().notNull(),
     changedAt: integer('changed_at').notNull(),
     deviceChangedAt: integer('device_changed_at'),
     actor: text('actor', { mode: 'json' }).$type<Actor>().notNull(),
@@ -31,7 +28,7 @@ export const todoVersions = sqliteTable(
   {
     id: text('id').primaryKey(),
     todoId: text('todo_id').notNull(),
-    ...versionColumns<Todos.ChangeKind, Todos.Field>(Todos.CHANGES),
+    ...versionColumns<Todos.ChangeKind>(Todos.CHANGES),
     title: text('title').notNull(),
     notes: text('notes').notNull(),
     dueDate: text('due_date'),

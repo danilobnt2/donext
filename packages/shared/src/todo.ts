@@ -47,7 +47,7 @@ export const CHANGES = ['create', 'edit'] as const;
 export type ChangeKind = (typeof CHANGES)[number];
 
 /** One version of a To-Do: its data after a change, and what, when and who changed it. */
-export interface Entity extends EntityBase, VersionFields<ChangeKind, Field> {
+export interface Entity extends EntityBase, VersionFields<ChangeKind> {
   kind: 'todoVersion';
   /** Derived from the To-Do and the version number: see versionId. */
   id: string;
@@ -222,7 +222,6 @@ export function apply(
     version,
     createdAt: current?.createdAt ?? now,
     change: change.op,
-    changedFields,
     changedAt: now,
     ...meta,
     title: current?.title ?? '',
@@ -242,6 +241,18 @@ export function apply(
         ]
       : [];
   return { ok: true, value: { put: [next], delete: pruned } };
+}
+
+const FIELDS: readonly Field[] = ['title', 'notes', 'dueDate', 'state'];
+
+/**
+ * What a version changed, found by comparing it with the version before it: every field
+ * for the first version, and null when the one before it was dropped past VERSION_LIMIT.
+ */
+export function changedFields(version: Entity, previous: Entity | null): Field[] | null {
+  if (version.version === 1) return [...FIELDS];
+  if (!previous || previous.version !== version.version - 1) return null;
+  return FIELDS.filter((field) => version[field] !== previous[field]);
 }
 
 class TodoType extends EntityType<Entity, Change, ViolationCode, Context> {

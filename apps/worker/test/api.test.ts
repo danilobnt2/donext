@@ -45,10 +45,10 @@ const seedVersions = (id: string, from: number, count: number) =>
     state.storage.sql.exec(
       `WITH RECURSIVE n(i) AS (SELECT CAST(?1 AS INTEGER) UNION ALL SELECT i + 1 FROM n WHERE i < ?2)
        INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
-         change, changed_fields, changed_at, device_changed_at, actor)
+         change, changed_at, device_changed_at, actor)
        SELECT ?3 || ':' || i, ?3, i, 'v' || i, '', NULL, 'new',
          (SELECT MIN(created_at) FROM todo_versions WHERE todo_id = ?3),
-         'edit', '["title"]', i, NULL, '{"kind":"device","id":null}'
+         'edit', i, NULL, '{"kind":"device","id":null}'
        FROM n`,
       from,
       from + count - 1,
@@ -117,8 +117,8 @@ describe('/api/v1/todos', () => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
          INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
-           change, changed_fields, changed_at, device_changed_at, actor)
-         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
+           change, changed_at, device_changed_at, actor)
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', 0, NULL,
            '{"kind":"device","id":null}'
          FROM n`,
         Todos.LIMIT,
@@ -134,8 +134,8 @@ describe('/api/v1/todos', () => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
          INSERT INTO todo_versions (id, todo_id, version, title, notes, due_date, state, created_at,
-           change, changed_fields, changed_at, device_changed_at, actor)
-         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', '[]', 0, NULL,
+           change, changed_at, device_changed_at, actor)
+         SELECT printf('SEED%022d', i) || ':1', printf('SEED%022d', i), 1, 'seed', '', NULL, 'new', 0, 'create', 0, NULL,
            '{"kind":"device","id":null}'
          FROM n`,
         Todos.LIMIT - 1,
@@ -250,6 +250,10 @@ describe('PATCH /api/v1/todos/:id', () => {
         newest: VERSION_LIMIT + 1,
       });
     });
+
+    const { versions } = await versionsOf(todo.id, '?before=3');
+    // Version 1 was dropped, so what version 2 changed is no longer known.
+    expect(versions).toMatchObject([{ version: 2, changedFields: null }]);
   });
 });
 
@@ -261,6 +265,8 @@ describe('GET /api/v1/todos/:id/versions', () => {
     expect(first.versions).toHaveLength(100);
     expect(first.versions[0]?.version).toBe(150);
     expect(first.nextBefore).toBe(51);
+    // The page's oldest version is still compared with the one before it.
+    expect(first.versions.at(-1)).toMatchObject({ version: 51, changedFields: ['title'] });
     const second = await versionsOf(todo.id, '?before=51');
     expect(second.versions.map((v) => v.version)).toEqual(
       Array.from({ length: 50 }, (_, i) => 50 - i),

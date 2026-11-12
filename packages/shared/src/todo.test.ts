@@ -12,7 +12,6 @@ const v1: Todos.Entity = {
   version: 1,
   createdAt: 100,
   change: 'create',
-  changedFields: ['title', 'notes', 'dueDate', 'state'],
   changedAt: 100,
   ...meta,
   ...data,
@@ -124,7 +123,6 @@ describe('apply', () => {
             id: `${ID}:2`,
             version: 2,
             change: 'edit',
-            changedFields: ['dueDate'],
             changedAt: 200,
             dueDate: '2026-11-30',
           },
@@ -172,5 +170,22 @@ describe('checkTitle', () => {
   it('counts code points, not UTF-16 units', () => {
     expect(Todos.checkTitle('🙂'.repeat(Todos.TITLE_MAX_LENGTH)).ok).toBe(true);
     expect(Todos.checkTitle('a'.repeat(Todos.TITLE_MAX_LENGTH + 1)).ok).toBe(false);
+  });
+});
+
+describe('changedFields', () => {
+  it('lists every field for the first version', () => {
+    expect(Todos.changedFields(v1, null)).toEqual(['title', 'notes', 'dueDate', 'state']);
+  });
+
+  it('compares a version with the one before it', () => {
+    const v2 = { ...v1, id: `${ID}:2`, version: 2, notes: 'Front only', dueDate: '2026-11-30' };
+    expect(Todos.changedFields(v2, v1)).toEqual(['notes', 'dueDate']);
+  });
+
+  it('is unknown when the version before was dropped', () => {
+    const v5 = { ...v1, id: `${ID}:5`, version: 5 };
+    expect(Todos.changedFields(v5, null)).toBeNull();
+    expect(Todos.changedFields(v5, v1)).toBeNull();
   });
 });

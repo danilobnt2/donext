@@ -130,7 +130,6 @@ describe('write', () => {
           version: 1,
           createdAt: now,
           change: 'create',
-          changedFields: ['title'],
           changedAt: now,
           ...meta,
           title: 'Both',

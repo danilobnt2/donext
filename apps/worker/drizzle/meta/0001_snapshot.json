@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e32835cb-df4a-4bbc-a542-515aa1d5d861",
+  "id": "03ee1871-0704-4822-89c6-07e1b8ec47a4",
   "prevId": "dc0610d3-5099-4727-90b9-d57aea1ec041",
   "tables": {
     "todo_versions": {
@@ -37,13 +37,6 @@
         },
         "change": {
           "name": "change",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "changed_fields": {
-          "name": "changed_fields",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

@@ -4,7 +4,6 @@ CREATE TABLE `todo_versions` (
 	`version` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	`change` text NOT NULL,
-	`changed_fields` text NOT NULL,
 	`changed_at` integer NOT NULL,
 	`device_changed_at` integer,
 	`actor` text NOT NULL,
