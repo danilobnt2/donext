@@ -1,5 +1,5 @@
-import type { EntityBase, FieldOf, Query, Store, Writes } from '@donext/shared';
-import { and, asc, count, desc, eq, getTableColumns, lt, sql, type SQL } from 'drizzle-orm';
+import type { EntityBase, FieldOf, Query, Store } from '@donext/shared';
+import { and, asc, count, desc, eq, getTableColumns, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { Db } from './db';
 
@@ -48,8 +48,8 @@ export function mappingsFor<E extends EntityBase>() {
 
 type Row = Record<string, unknown>;
 
-/** A Filter of any kind, as the store reads it. */
-type AnyFilter = { where?: Row; before?: { field: string; value: unknown } };
+/** The `where` of a Query of any kind, as the store reads it. */
+type AnyWhere = Row | undefined;
 
 /** Walks the distinct values of a column, highest first, one index seek each. */
 function distinctValues(table: SQLiteTable, column: SQLiteColumn): SQL {
@@ -86,12 +86,6 @@ export class DbStore<E extends EntityBase> implements Store<E> {
     private readonly mappings: Mappings<E>,
   ) {}
 
-  async get<K extends E['kind']>(kind: K, id: string): Promise<Extract<E, { kind: K }> | null> {
-    const { table } = this.mappings[kind];
-    const row = this.db.select().from(table).where(eq(table.id, id)).get();
-    return row ? this.toEntity(kind, row) : null;
-  }
-
   async find<K extends E['kind']>(
     kind: K,
     query: Query<Extract<E, { kind: K }>> = {},
@@ -114,19 +108,13 @@ export class DbStore<E extends EntityBase> implements Store<E> {
     return this.newestPerSync(kind, groupBy, orderBy);
   }
 
-  async commit(writes: Writes<E>): Promise<void> {
+  async commit(entities: E[]): Promise<void> {
     this.db.transaction((tx) => {
-      for (const filter of writes.delete) {
-        const { table } = this.mappings[filter.kind as E['kind']];
-        tx.delete(table)
-          .where(this.where(table, filter as AnyFilter))
-          .run();
-      }
-      for (const entity of writes.put) {
+      for (const entity of entities) {
         const { table } = this.mappings[entity.kind as E['kind']];
         const row = { ...entity } as Row;
         delete row.kind;
-        tx.insert(table).values(row).onConflictDoUpdate({ target: table.id, set: row }).run();
+        tx.insert(table).values(row).run();
       }
     });
   }
@@ -141,7 +129,7 @@ export class DbStore<E extends EntityBase> implements Store<E> {
     let select = this.db
       .select()
       .from(table)
-      .where(this.where(table, query as AnyFilter))
+      .where(this.where(table, query.where as AnyWhere))
       .$dynamic();
     if (column) select = select.orderBy(order.desc ? desc(column) : asc(column));
     if (query.limit !== undefined) select = select.limit(query.limit);
@@ -171,14 +159,10 @@ export class DbStore<E extends EntityBase> implements Store<E> {
     return this.db.delete(table).returning({ id: table.id }).all().length;
   }
 
-  private where(table: EntityTable, filter: AnyFilter): SQL | undefined {
-    const conditions = Object.entries(filter.where ?? {}).map(([field, value]) =>
-      eq(this.column(table, field), value),
+  private where(table: EntityTable, where: AnyWhere): SQL | undefined {
+    return and(
+      ...Object.entries(where ?? {}).map(([field, value]) => eq(this.column(table, field), value)),
     );
-    if (filter.before) {
-      conditions.push(lt(this.column(table, filter.before.field), filter.before.value));
-    }
-    return and(...conditions);
   }
 
   private column(table: EntityTable, field: string): SQLiteColumn {

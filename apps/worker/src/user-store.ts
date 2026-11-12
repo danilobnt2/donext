@@ -10,8 +10,6 @@ import {
   type Kind,
   type FieldOf,
   type Meta,
-  type Query,
-  type Writes,
 } from '@donext/shared';
 import { openDb } from './db';
 import { DbStore } from './db-store';
@@ -32,14 +30,6 @@ export class UserStore extends DurableObject<Env> {
     });
   }
 
-  get<K extends Kind>(kind: K, id: string): Promise<EntityOf<K> | null> {
-    return this.store.get(kind, id);
-  }
-
-  find<K extends Kind>(kind: K, query?: Query<EntityOf<K>>): EntityOf<K>[] {
-    return this.store.findSync(kind, query);
-  }
-
   count<K extends Kind>(kind: K, distinct?: FieldOf<EntityOf<K>>): number {
     return this.store.countSync(kind, distinct as FieldOf<Extract<Entity, { kind: K }>>);
   }
@@ -58,7 +48,7 @@ export class UserStore extends DurableObject<Env> {
     kind: K,
     change: ChangeOf<K>,
     meta: Meta,
-  ): Promise<Checked<Writes<Entity>, CodeOf<K>>> {
+  ): Promise<Checked<Entity[], CodeOf<K>>> {
     return write(entities[kind], this.store, change, meta, Date.now());
   }
 
