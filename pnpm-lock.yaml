@@ -209,12 +209,12 @@ importers:
 
   apps/worker:
     dependencies:
+      '@automerge/automerge':
+        specifier: 3.5.0
+        version: 3.5.0
       '@donext/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      ulid:
-        specifier: 3.0.2
-        version: 3.0.2
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: ^1.4.0
