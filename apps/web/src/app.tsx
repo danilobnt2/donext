@@ -1,6 +1,6 @@
 import { checkTitle, type Todo, type TodoState } from '@donext/shared';
-import { useEffect, useState } from 'preact/hooks';
-import { createTodo, deleteAllTodos, listTodos } from './api';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { BoardClient } from './board-client';
 
 const STATE_LABELS: Record<TodoState, string> = {
   new: 'New',
@@ -17,20 +17,28 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const clientRef = useRef<BoardClient | null>(null);
 
   useEffect(() => {
-    listTodos().then(setTodos, (e: Error) => setLoadError(e.message));
+    const client = new BoardClient(setTodos, setLoadError);
+    clientRef.current = client;
+    void client.start();
+    return () => {
+      client.stop();
+      clientRef.current = null;
+    };
   }, []);
 
   async function onSubmit(event: Event) {
     event.preventDefault();
     const check = checkTitle(title);
     if (!check.ok) return setFormError(check.message);
+    if (!clientRef.current) return;
     setSaving(true);
     setFormError(null);
     try {
-      const todo = await createTodo(check.title);
-      setTodos((current) => [todo, ...(current ?? [])]);
+      const res = await clientRef.current.createTodo(check.title);
+      if (!res.ok) return setFormError(res.message);
       setTitle('');
     } catch (e) {
       setFormError((e as Error).message);
@@ -40,10 +48,10 @@ export function App() {
   }
 
   async function onDeleteAll() {
+    if (!clientRef.current) return;
     setDeleteError(null);
     try {
-      await deleteAllTodos();
-      setTodos([]);
+      await clientRef.current.deleteAllTodos();
       setConfirmingDelete(false);
     } catch (e) {
       setDeleteError((e as Error).message);
@@ -70,7 +78,7 @@ export function App() {
             aria-invalid={formError !== null}
             aria-describedby={formError ? 'title-error' : undefined}
           />
-          <button type="submit" disabled={saving}>
+          <button type="submit" disabled={saving || todos === null}>
             Add
           </button>
         </div>

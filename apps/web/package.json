@@ -9,6 +9,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@automerge/automerge": "3.5.0",
     "@donext/shared": "workspace:*",
     "preact": "11.0.1"
   },
