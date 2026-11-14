@@ -15,9 +15,21 @@ const VIEWPORTS = {
   desktop: { width: 1000, height: 400, deviceScaleFactor: 2 },
 };
 
-test.beforeAll(async ({ request }) => {
-  await request.delete('/api/v1/todos');
-  for (const title of SAMPLE_TODOS) await request.post('/api/v1/todos', { data: { title } });
+test.beforeAll(async ({ browser, request }) => {
+  await request.delete('/api/v1/board');
+  const page = await browser.newPage();
+  const peer = await browser.newPage();
+  await page.goto('/');
+  await peer.goto('/');
+  await expect(page.getByText('Nothing yet. Add your first To-Do above.')).toBeVisible();
+  const input = page.getByLabel('New To-Do');
+  for (const title of SAMPLE_TODOS) {
+    await input.fill(title);
+    await input.press('Enter');
+  }
+  await expect(peer.getByRole('listitem')).toHaveCount(SAMPLE_TODOS.length);
+  await page.close();
+  await peer.close();
 });
 
 for (const [name, { deviceScaleFactor, ...viewport }] of Object.entries(VIEWPORTS)) {

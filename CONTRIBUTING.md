@@ -51,4 +51,4 @@ Nothing is deployed by hand.
 4. The run waits for approval on the `production` GitHub environment.
 5. On approval, it applies D1 migrations, deploys the same artifact to production, [donext.orben.dev](https://donext.orben.dev), and smoke-tests it.
 
-`wrangler deploy` creates the Worker, its custom domain and its Durable Object namespace from `wrangler.jsonc`. Redeploying unchanged config is a no-op. Durable Object SQLite schemas are migrated in code (`apps/worker/src/schema.ts`) the first time each object starts after a deploy. D1 migrations run in the pipeline, before the code that needs them. Keep both backward compatible with the previous release.
+`wrangler deploy` creates the Worker, its custom domain and its Durable Object namespace from `wrangler.jsonc`. Redeploying unchanged config is a no-op. Durable Object SQLite storage is initialized in code (`apps/worker/src/user-store.ts`) the first time each object starts after a deploy. D1 migrations run in the pipeline, before the code that needs them. Keep both backward compatible with the previous release.
