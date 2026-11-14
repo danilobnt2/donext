@@ -1,55 +1,56 @@
 import { DurableObject } from 'cloudflare:workers';
-import {
-  entities,
-  write,
-  type ChangeOf,
-  type Checked,
-  type CodeOf,
-  type Entity,
-  type EntityOf,
-  type Kind,
-} from '@donext/shared';
-import { openDb } from './db';
-import { DbStore } from './db-store';
-import { mappings } from './entities';
+import { TODO_LIMIT, type Todo, type TodoState } from '@donext/shared';
+import { ulid } from 'ulid';
+import { migrate } from './schema';
 
-/**
- * One user's data. Until sign-in exists, a single shared instance holds everything. It
- * only routes: the kinds of entity and their rules live in @donext/shared, their tables in
- * entities.ts.
- */
+type TodoRow = { id: string; title: string; state: TodoState; created_at: string };
+
+export type CreateTodoResult = { ok: true; todo: Todo } | { ok: false; reason: 'limit_reached' };
+
+/** One user's data. Until sign-in exists, a single shared instance holds every To-Do. */
 export class UserStore extends DurableObject<Env> {
-  private store!: DbStore<Entity>;
-
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => {
-      this.store = new DbStore(await openDb(ctx.storage), mappings);
-    });
+    ctx.blockConcurrencyWhile(async () => migrate(ctx.storage));
   }
 
-  /** Every entity of a type, newest first. */
-  list<K extends Kind>(type: K): EntityOf<K>[] {
-    return this.store.list(type);
+  listTodos(): Todo[] {
+    return this.ctx.storage.sql
+      .exec<TodoRow>(
+        "SELECT id, title, state, created_at FROM work_items WHERE type = 'todo' ORDER BY id DESC",
+      )
+      .toArray()
+      .map(toTodo);
   }
 
-  /** Applies a change and returns the entity it targets as it now stands. */
-  async write<K extends Kind>(
-    type: K,
-    change: ChangeOf<K>,
-  ): Promise<Checked<EntityOf<K>, CodeOf<K>>> {
-    const result = await write(entities[type], this.store, change, Date.now());
-    if (!result.ok) return result;
-    const entity = result.value.find((e) => e.kind === type && e.id === change.id);
-    if (!entity) throw new Error(`Writing ${type} ${change.id} did not produce it.`);
-    return { ok: true, value: entity as EntityOf<K> };
+  createTodo(title: string): CreateTodoResult {
+    const { count } = this.ctx.storage.sql
+      .exec<{ count: number }>("SELECT COUNT(*) AS count FROM work_items WHERE type = 'todo'")
+      .one();
+    if (count >= TODO_LIMIT) return { ok: false, reason: 'limit_reached' };
+
+    const now = new Date().toISOString();
+    const row: TodoRow = { id: ulid(), title, state: 'new', created_at: now };
+    this.ctx.storage.sql.exec(
+      "INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at) VALUES (?, 'todo', ?, ?, 1, ?, ?)",
+      row.id,
+      row.title,
+      row.state,
+      now,
+      now,
+    );
+    return { ok: true, todo: toTodo(row) };
   }
 
   /**
-   * Deletes every entity of a type. Lets anyone clear the shared board of unwanted content
-   * until sign-in gives each user their own; remove it then.
+   * Deletes every To-Do. Lets anyone clear the shared board of unwanted content until
+   * sign-in gives each user their own; remove it then.
    */
-  deleteAll(type: Kind): number {
-    return this.store.deleteAll(type);
+  deleteAllTodos(): number {
+    return this.ctx.storage.sql.exec("DELETE FROM work_items WHERE type = 'todo'").rowsWritten;
   }
+}
+
+function toTodo(row: TodoRow): Todo {
+  return { id: row.id, title: row.title, state: row.state, createdAt: row.created_at };
 }

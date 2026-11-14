@@ -1,6 +1,5 @@
-import { Todos, type Todo } from '@donext/shared';
+import { TITLE_MAX_LENGTH, TODO_LIMIT, type Todo } from '@donext/shared';
 import { runInDurableObject } from 'cloudflare:test';
-import { openDb } from '../src/db';
 import { env, exports } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -51,7 +50,7 @@ describe('/api/v1/todos', () => {
     ['a missing title', {}],
     ['a blank title', { title: '   ' }],
     ['a non-string title', { title: 7 }],
-    ['an over-long title', { title: 'x'.repeat(Todos.TITLE_MAX_LENGTH + 1) }],
+    ['an over-long title', { title: 'x'.repeat(TITLE_MAX_LENGTH + 1) }],
   ])('rejects %s', async (_, body) => {
     const res = await post(body);
     expect(res.status).toBe(400);
@@ -69,35 +68,19 @@ describe('/api/v1/todos', () => {
     expect(res.status).toBe(413);
   });
 
-  it('refuses new To-Dos once the board holds Todos.LIMIT', async () => {
+  it('refuses new To-Dos once the board holds TODO_LIMIT', async () => {
     const stub = env.USER_STORE.getByName('shared-board');
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec(
         `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
          INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
          SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
-        Todos.LIMIT,
+        TODO_LIMIT,
       );
     });
     const res = await post({ title: 'One too many' });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: { code: 'todo_limit_reached' } });
-  });
-
-  it('lets exactly one of several concurrent creates take the last slot', async () => {
-    const stub = env.USER_STORE.getByName('shared-board');
-    await runInDurableObject(stub, (_instance, state) => {
-      state.storage.sql.exec(
-        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
-         INSERT INTO work_items (id, type, title, state, rev, created_at, updated_at)
-         SELECT printf('seed%022d', i), 'todo', 'seed', 'new', 1, '', '' FROM n`,
-        Todos.LIMIT - 1,
-      );
-    });
-    const results = await Promise.all(
-      Array.from({ length: 5 }, (_, i) => post({ title: `Racer ${i}` })),
-    );
-    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409]);
   });
 
   it('deletes every To-Do', async () => {
@@ -120,35 +103,5 @@ describe('unknown API routes', () => {
     const res = await api(path);
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: { code: 'not_found' } });
-  });
-});
-
-describe('database setup', () => {
-  it('discards the pre-Drizzle schema and its data, then migrates from scratch', async () => {
-    await runInDurableObject(env.USER_STORE.getByName('setup-test'), async (_instance, state) => {
-      const sql = state.storage.sql;
-      // Rewind this object to what the pre-Drizzle runner left behind.
-      sql.exec('DROP TABLE __drizzle_migrations');
-      sql.exec(
-        "INSERT INTO work_items VALUES ('01JBZZZZZZZZZZZZZZZZZZZZZ1', 'todo', 'Old', 'new', 1, '', '')",
-      );
-      sql.exec(
-        'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)',
-      );
-      sql.exec("INSERT INTO schema_migrations VALUES (1, '2026-10-10T00:00:00.000Z')");
-
-      await openDb(state.storage);
-      await openDb(state.storage);
-
-      const tables = sql
-        .exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
-        )
-        .toArray()
-        .map((t) => t.name);
-      expect(tables).toEqual(['__drizzle_migrations', 'work_items']);
-      expect(sql.exec('SELECT COUNT(*) AS n FROM work_items').one()).toEqual({ n: 0 });
-      expect(sql.exec('SELECT COUNT(*) AS n FROM __drizzle_migrations').one()).toEqual({ n: 1 });
-    });
   });
 });
