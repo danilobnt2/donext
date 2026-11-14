@@ -9,6 +9,10 @@
     "typecheck": "tsc -p .",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@automerge/automerge": "3.5.0",
+    "ulid": "3.0.2"
+  },
   "devDependencies": {
     "vitest": "5.0.3"
   }
