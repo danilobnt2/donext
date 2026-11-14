@@ -7,18 +7,15 @@
     "dev": "wrangler dev",
     "typecheck": "tsc -p .",
     "test": "vitest run",
-    "types": "wrangler types --strict-vars false",
-    "db:generate": "drizzle-kit generate"
+    "types": "wrangler types --strict-vars false"
   },
   "dependencies": {
-    "@donext/shared": "workspace:*",
-    "drizzle-orm": "0.45.4",
-    "ulid": "3.0.2"
+    "@automerge/automerge": "3.5.0",
+    "@donext/shared": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.0",
     "@donext/web": "workspace:*",
-    "drizzle-kit": "0.31.11",
     "vitest": "5.0.3",
     "wrangler": "4.149.0"
   }

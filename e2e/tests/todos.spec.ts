@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ request, page }) => {
-  // Start every test from an empty board.
-  expect((await request.delete('/api/v1/todos')).ok()).toBe(true);
+  expect((await request.delete('/api/v1/board')).ok()).toBe(true);
   await page.goto('/');
+  await expect(page.getByText('Nothing yet. Add your first To-Do above.')).toBeVisible();
 });
 
 test('shows an empty board', async ({ page }) => {
@@ -48,11 +48,12 @@ test('rejects blank and over-long titles', async ({ page }) => {
   await expect(page.getByText('Nothing yet. Add your first To-Do above.')).toBeVisible();
 });
 
-test('deletes every To-Do only after confirming', async ({ page, request }) => {
+test('deletes every To-Do only after confirming', async ({ page }) => {
+  const input = page.getByLabel('New To-Do');
   for (const title of ['Cut the lawn', 'Fix the bike brakes']) {
-    expect((await request.post('/api/v1/todos', { data: { title } })).ok()).toBe(true);
+    await input.fill(title);
+    await input.press('Enter');
   }
-  await page.reload();
   await expect(page.getByRole('listitem')).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Delete all' }).click();
@@ -67,4 +68,43 @@ test('deletes every To-Do only after confirming', async ({ page, request }) => {
 
   await page.reload();
   await expect(page.getByRole('listitem')).toHaveCount(0);
+});
+
+test('keeps offline edits in IndexedDB across reloads and merges live across devices', async ({
+  page,
+  context,
+  browser,
+}) => {
+  const peerContext = await browser.newContext();
+  try {
+    const peerPage = await peerContext.newPage();
+    await peerPage.goto('/');
+    await expect(peerPage.getByText('Nothing yet. Add your first To-Do above.')).toBeVisible();
+
+    let blockSync = true;
+    await context.routeWebSocket('**/api/v1/sync', (ws) => {
+      if (blockSync) ws.close();
+      else ws.connectToServer();
+    });
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+
+    await page.getByLabel('New To-Do').fill('Pack hiking boots');
+    await page.getByRole('button', { name: 'Add' }).click();
+
+    await page.reload();
+    await expect(page.getByRole('listitem')).toHaveText([/Pack hiking boots/]);
+    await expect(peerPage.getByRole('listitem')).toHaveCount(0);
+
+    await peerPage.getByLabel('New To-Do').fill('Book train tickets');
+    await peerPage.getByRole('button', { name: 'Add' }).click();
+
+    blockSync = false;
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+    const merged = [/Book train tickets/, /Pack hiking boots/];
+    await expect(page.getByRole('listitem')).toHaveText(merged);
+    await expect(peerPage.getByRole('listitem')).toHaveText(merged);
+  } finally {
+    await peerContext.close();
+  }
 });
