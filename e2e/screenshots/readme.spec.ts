@@ -26,6 +26,7 @@ test.beforeAll(async ({ browser, request }) => {
   for (const title of SAMPLE_TODOS) {
     await input.fill(title);
     await input.press('Enter');
+    await expect(input).toHaveValue('');
   }
   await expect(peer.getByRole('listitem')).toHaveCount(SAMPLE_TODOS.length);
   await page.close();
