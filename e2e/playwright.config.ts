@@ -6,7 +6,6 @@ const externalBaseUrl = process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: 'tests',
-  // Every test runs against the one shared board, so tests run one at a time.
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

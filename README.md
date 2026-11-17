@@ -55,10 +55,10 @@ Screens are designed for mobile (390 px), tablet and desktop: Next up, To-Dos bo
 
 ## Status
 
-Bootstrap. The deployed slice lets anyone create a To-Do and see the list, on one board shared by everyone until sign-in exists. Limits: 500 characters per title, 10,000 To-Dos per board. Anyone can delete every To-Do with one button, so unwanted content can be cleared at once; this goes away with sign-in.
+Early slice. Sign in with Google (via OpenID Connect) gives each person their own board, synced live across devices with offline support. Limits: 500 characters per title, 10,000 To-Dos per board.
 
 <p>
-  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/desktop.png" alt="Do Next on desktop: a New To-Do form above a list of five To-Dos, each marked New, with a Delete all button" width="560">
+  <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/desktop.png" alt="Do Next on desktop: a header with Sign out, a New To-Do form, and a list of five To-Dos each marked New with a Delete all button" width="560">
   <img src="https://raw.githubusercontent.com/danilobnt2/donext/screenshots/mobile.png" alt="The same screen on a phone" width="218">
 </p>
 
