@@ -19,7 +19,13 @@ export interface Todo {
   createdAt: string;
 }
 
-export type ApiErrorCode = 'not_found';
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export type ApiErrorCode = 'bad_request' | 'not_found' | 'unauthorized';
 
 export interface ApiError {
   error: { code: ApiErrorCode; message: string };

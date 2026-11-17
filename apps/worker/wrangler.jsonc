@@ -21,7 +21,12 @@
   "durable_objects": {
     "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
   },
-  "vars": { "ENVIRONMENT": "development", "GIT_SHA": "dev" },
+  "vars": {
+    "ENVIRONMENT": "development",
+    "GIT_SHA": "dev",
+    "OIDC_ISSUER": "",
+    "OIDC_CLIENT_ID": "",
+  },
   "env": {
     "staging": {
       "name": "donext-staging",
@@ -29,7 +34,12 @@
       "durable_objects": {
         "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
       },
-      "vars": { "ENVIRONMENT": "staging", "GIT_SHA": "unknown" },
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "GIT_SHA": "unknown",
+        "OIDC_ISSUER": "https://auth.orben.dev",
+        "OIDC_CLIENT_ID": "donext",
+      },
     },
     "production": {
       "name": "donext",
@@ -37,7 +47,12 @@
       "durable_objects": {
         "bindings": [{ "name": "USER_STORE", "class_name": "UserStore" }],
       },
-      "vars": { "ENVIRONMENT": "production", "GIT_SHA": "unknown" },
+      "vars": {
+        "ENVIRONMENT": "production",
+        "GIT_SHA": "unknown",
+        "OIDC_ISSUER": "https://auth.orben.dev",
+        "OIDC_CLIENT_ID": "donext",
+      },
     },
   },
 }

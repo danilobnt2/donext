@@ -12,7 +12,6 @@ import {
 } from '@donext/shared';
 
 const STORE = 'board';
-const KEY = 'current';
 let wasmReady: Promise<void> | null = null;
 
 type StoredBoard = { docId: string; snapshot: Uint8Array };
@@ -30,6 +29,7 @@ export class BoardClient {
   private stopped = false;
 
   constructor(
+    private readonly userId: string,
     private readonly onTodos: (todos: Todo[]) => void,
     private readonly onLoadError: (msg: string | null) => void,
   ) {}
@@ -43,7 +43,7 @@ export class BoardClient {
     this.db = await openDb();
     if (this.stopped) return this.db?.close();
 
-    const cached = await loadLocal(this.db);
+    const cached = await loadLocal(this.db, this.userId);
     if (this.stopped) return this.db?.close();
     if (cached) {
       this.docId = cached.docId;
@@ -75,7 +75,7 @@ export class BoardClient {
     if (!added.ok) return added;
     this.doc = added.doc;
     this.onTodos(listTodos(this.doc));
-    await saveLocal(this.db, this.docId, Automerge.save(this.doc));
+    await saveLocal(this.db, this.userId, this.docId, Automerge.save(this.doc));
     this.flush();
     return { ok: true };
   }
@@ -159,7 +159,7 @@ export class BoardClient {
       this.syncState = Automerge.initSyncState();
       this.onLoadError(null);
       this.onTodos(listTodos(this.doc));
-      void saveLocal(this.db, frame.docId, frame.data);
+      void saveLocal(this.db, this.userId, frame.docId, frame.data);
       this.flush();
       return;
     }
@@ -169,7 +169,7 @@ export class BoardClient {
     [this.doc, this.syncState] = Automerge.receiveSyncMessage(this.doc, this.syncState, frame.data);
     if (!headsEqual(prevHeads, Automerge.getHeads(this.doc))) {
       this.onTodos(listTodos(this.doc));
-      void saveLocal(this.db, this.docId, Automerge.save(this.doc));
+      void saveLocal(this.db, this.userId, this.docId, Automerge.save(this.doc));
     }
     this.flush();
   }
@@ -186,6 +186,22 @@ export class BoardClient {
   }
 }
 
+export async function clearCachedBoard(userId: string): Promise<void> {
+  const db = await openDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(boardKey(userId));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+  db.close();
+}
+
+function boardKey(userId: string): string {
+  return `board:${userId}`;
+}
+
 function openDb(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     const req = indexedDB.open('donext', 1);
@@ -195,21 +211,26 @@ function openDb(): Promise<IDBDatabase | null> {
   });
 }
 
-function loadLocal(db: IDBDatabase | null): Promise<StoredBoard | null> {
+function loadLocal(db: IDBDatabase | null, userId: string): Promise<StoredBoard | null> {
   if (!db) return Promise.resolve(null);
   return new Promise((resolve) => {
-    const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+    const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(boardKey(userId));
     req.onsuccess = () => resolve((req.result as StoredBoard | undefined) ?? null);
     req.onerror = () => resolve(null);
   });
 }
 
-function saveLocal(db: IDBDatabase | null, docId: string, snapshot: Uint8Array): Promise<void> {
+function saveLocal(
+  db: IDBDatabase | null,
+  userId: string,
+  docId: string,
+  snapshot: Uint8Array,
+): Promise<void> {
   if (!db) return Promise.resolve();
   const copy = new Uint8Array(snapshot);
   return new Promise((resolve) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put({ docId, snapshot: copy } satisfies StoredBoard, KEY);
+    tx.objectStore(STORE).put({ docId, snapshot: copy } satisfies StoredBoard, boardKey(userId));
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });
