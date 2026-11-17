@@ -66,8 +66,7 @@ h2 {
   color: var(--muted);
 }
 
-.new-todo,
-.sign-in {
+.new-todo {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -78,9 +77,77 @@ h2 {
 }
 
 .sign-in {
-  padding: 20px;
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 14px;
+  gap: 10px;
+}
+
+.gsi-material-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #747775;
+  border-radius: 20px;
+  background-color: #ffffff;
+  color: #1f1f1f;
+  font:
+    500 14px/20px 'Roboto',
+    arial,
+    sans-serif;
+  letter-spacing: 0.25px;
+  text-decoration: none;
+  user-select: none;
+  overflow: hidden;
+  transition: box-shadow 0.218s;
+}
+
+.gsi-material-button-state {
+  position: absolute;
+  inset: 0;
+  background-color: #303030;
+  opacity: 0;
+  transition: opacity 0.218s;
+}
+
+.gsi-material-button-content-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.gsi-material-button-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  flex: none;
+}
+
+.gsi-material-button-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.gsi-material-button-contents {
+  white-space: nowrap;
+}
+
+.gsi-material-button:hover {
+  box-shadow:
+    0 1px 2px 0 rgba(60, 64, 67, 0.3),
+    0 1px 3px 1px rgba(60, 64, 67, 0.15);
+}
+
+.gsi-material-button:hover .gsi-material-button-state {
+  opacity: 0.08;
+}
+
+.gsi-material-button:active .gsi-material-button-state,
+.gsi-material-button:focus-visible .gsi-material-button-state {
+  opacity: 0.12;
 }
 
 .new-todo label {
@@ -110,13 +177,12 @@ input {
 
 input:focus-visible,
 button:focus-visible,
-a.button:focus-visible {
+.gsi-material-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-button,
-a.button {
+button {
   height: 48px;
   min-width: 76px;
   border: 0;
@@ -127,14 +193,6 @@ a.button {
     600 15px 'IBM Plex Sans',
     sans-serif;
   cursor: pointer;
-}
-
-a.button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 18px;
-  text-decoration: none;
 }
 
 button:disabled {
