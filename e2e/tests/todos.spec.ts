@@ -30,6 +30,20 @@ test('requires sign-in before showing the board and clears session on sign-out',
 
   await page.reload();
   await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
+
+  await signInLink.click();
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await page.route('**/api/v1/auth/logout', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({
+      status: 200,
+      headers: { ...res.headers(), 'content-type': 'application/json' },
+      body: JSON.stringify({ logoutUrl: '/?logged_out=1' }),
+    });
+  });
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\?logged_out=1$/);
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
 });
 
 test('shows an empty board for a newly signed-in user', async ({ page }) => {

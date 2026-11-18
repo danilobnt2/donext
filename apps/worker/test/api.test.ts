@@ -137,6 +137,7 @@ describe('Worker authentication, sync and gatekeeper', () => {
           authorization_endpoint: `${issuer}/authorize`,
           token_endpoint: `${issuer}/token`,
           jwks_uri: `${issuer}/.well-known/jwks.json`,
+          end_session_endpoint: `${issuer}/logout`,
           id_token_signing_alg_values_supported: ['ES256'],
         });
       }
@@ -183,6 +184,7 @@ describe('Worker authentication, sync and gatekeeper', () => {
     expect(loginRes.status).toBe(302);
     const redirectUrl = new URL(loginRes.headers.get('Location')!);
     expect(redirectUrl.origin + redirectUrl.pathname).toBe(`${issuer}/authorize`);
+    expect(redirectUrl.searchParams.get('prompt')).toBe('select_account');
     capturedChallenge = redirectUrl.searchParams.get('code_challenge')!;
     const state = redirectUrl.searchParams.get('state')!;
     const oidcCookie = loginRes.headers.get('Set-Cookie')!.split(';')[0]!;
@@ -239,9 +241,15 @@ describe('Worker authentication, sync and gatekeeper', () => {
       }),
       prodEnv,
     );
-    expect(logoutRes.status).toBe(204);
+    expect(logoutRes.status).toBe(200);
     expect(logoutRes.headers.get('Set-Cookie')).toContain('__Host-session=;');
     expect(logoutRes.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    const { logoutUrl } = (await logoutRes.json()) as { logoutUrl: string };
+    const endUrl = new URL(logoutUrl);
+    expect(endUrl.origin + endUrl.pathname).toBe(`${issuer}/logout`);
+    expect(endUrl.searchParams.get('client_id')).toBe('donext');
+    expect(endUrl.searchParams.get('post_logout_redirect_uri')).toBe('https://donext.orben.dev/');
+    expect(endUrl.searchParams.get('return_to')).toBe('https://donext.orben.dev/');
   });
 
   it('isolates boards strictly per authenticated user', async () => {

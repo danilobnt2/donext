@@ -40,10 +40,7 @@ export default {
     if (pathname === '/api/v1/auth/logout') {
       if (request.method !== 'POST') return methodNotAllowed('POST');
       if (!isSameOrigin(request, url)) return new Response('Forbidden.', { status: 403 });
-      return new Response(null, {
-        status: 204,
-        headers: { 'Set-Cookie': setCookie('session', '', url, 0) },
-      });
+      return handleLogout(url, env);
     }
 
     if (pathname === '/api/v1/sync') {
@@ -100,10 +97,34 @@ async function handleLogin(url: URL, env: WorkerEnv): Promise<Response> {
     state,
     code_challenge: await oidc.calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: 'S256',
+    prompt: 'select_account',
   });
   return redirect(redirectTo.href, [
     setCookie('oidc', `${state}:${codeVerifier}`, url, OIDC_MAX_AGE),
   ]);
+}
+
+async function handleLogout(url: URL, env: WorkerEnv): Promise<Response> {
+  const clearSession = setCookie('session', '', url, 0);
+  if (env.OIDC_ISSUER && env.OIDC_CLIENT_ID) {
+    try {
+      const config = await discoverOidc(env);
+      if (config.serverMetadata().end_session_endpoint) {
+        const home = `${url.origin}/`;
+        const endUrl = oidc.buildEndSessionUrl(config, {
+          post_logout_redirect_uri: home,
+          return_to: home,
+        });
+        return Response.json(
+          { logoutUrl: endUrl.href },
+          { headers: { 'Set-Cookie': clearSession, 'Cache-Control': 'no-store' } },
+        );
+      }
+    } catch {
+      // Fall back to clearing the local session cookie if OIDC discovery fails.
+    }
+  }
+  return new Response(null, { status: 204, headers: { 'Set-Cookie': clearSession } });
 }
 
 async function handleCallback(request: Request, url: URL, env: WorkerEnv): Promise<Response> {
